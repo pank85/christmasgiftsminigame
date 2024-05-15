@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/game_over_background">
+    <RelativeLayout
+        android:id="@+id/game_over_top_buttons"
+        android:layout_alignParentTop="true"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <ImageButton
+            android:id="@+id/btn_restart"
+            android:layout_width="200px"
+            android:layout_height="200px"
+            android:layout_alignParentLeft="true"
+            android:background="@drawable/restart" />
+        <ImageButton
+            android:id="@+id/btn_exit"
+            android:layout_width="200px"
+            android:layout_height="200px"
+            android:layout_alignParentRight="true"
+            android:background="@drawable/exit"/>
+    </RelativeLayout>
+    <RelativeLayout
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent">
+        <TableLayout
+            android:layout_centerVertical="true"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <TableRow
+                android:layout_width="match_parent"
+                android:gravity="center">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="28sp"
+                    android:gravity="center"
+                    android:fontFamily="@font/winter_snow_regular"
+                    android:text="" />
+            </TableRow>
+            <TableRow
+                android:layout_width="match_parent"
+                android:gravity="center">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="28sp"
+                    android:gravity="center"
+                    android:fontFamily="@font/winter_snow_regular"
+                    android:text="" />
+            </TableRow>
+            <TableRow
+                android:layout_width="match_parent"
+                android:gravity="center">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="28sp"
+                    android:gravity="center"
+                    android:fontFamily="@font/winter_snow_regular"
+                    android:text="" />
+            </TableRow>
+            <TableRow
+                android:layout_width="match_parent"
+                android:gravity="center">
+                <TextView
+                    android:id="@+id/score"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="28sp"
+                    android:gravity="center"
+                    android:fontFamily="@font/winter_snow_regular"
+                    android:text="Your Score: " />
+            </TableRow>
+            <TableRow
+                android:layout_width="match_parent"
+                android:gravity="center">
+                <TextView
+                    android:id="@+id/highScore"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="28sp"
+                    android:gravity="center"
+                    android:fontFamily="@font/winter_snow_regular"
+                    android:text="High Score: " />
+            </TableRow>
+        </TableLayout>
+    </RelativeLayout>
+</RelativeLayout>
