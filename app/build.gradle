@@ -2,36 +2,89 @@ plugins {
     id 'com.android.application'
 }
 
+def releaseSigningValid = false
+
 android {
     namespace 'com.example.christmasgifts'
-    compileSdk 32
+    compileSdk 35
 
     defaultConfig {
-        applicationId "com.example.christmasgifts"
+        applicationId "com.pank.christmasgifts"
         minSdk 24
-        targetSdk 32
+        targetSdk 35
         versionCode 1
         versionName "1.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        release {
+            def propertiesFile = rootProject.file('keystore.properties')
+            if (propertiesFile.isFile()) {
+                try {
+                    def signingProperties = new Properties()
+                    propertiesFile.withInputStream { signingProperties.load(it) }
+                    if (['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].any { !signingProperties.getProperty(it)?.trim() }) {
+                        throw new GradleException('Invalid release signing properties')
+                    }
+                    def requestedStore = new File(signingProperties.getProperty('storeFile'))
+                    if (!requestedStore.isAbsolute() || !requestedStore.isFile()) {
+                        throw new GradleException('Invalid release keystore location')
+                    }
+                    def resolvedStore = requestedStore.canonicalFile
+                    if (resolvedStore.toPath().startsWith(rootProject.rootDir.canonicalFile.toPath())) {
+                        throw new GradleException('Invalid release keystore location')
+                    }
+                    // Git detects enclosing worktrees, including linked worktrees and symlink targets.
+                    def command = new ProcessBuilder('git', '-C', resolvedStore.parent, 'rev-parse', '--is-inside-work-tree')
+                    command.environment().keySet().removeAll { it.startsWith('GIT_') }
+                    command.environment().put('LC_ALL', 'C')
+                    command.redirectErrorStream(true)
+                    def process = command.start()
+                    def output = process.inputStream.getText('UTF-8').trim()
+                    int status = process.waitFor()
+                    if (status == 0 || !(status == 128 && output.startsWith('fatal: not a git repository'))) {
+                        throw new GradleException('Invalid release keystore location')
+                    }
+                    storeFile resolvedStore
+                    storePassword signingProperties.getProperty('storePassword')
+                    keyAlias signingProperties.getProperty('keyAlias')
+                    keyPassword signingProperties.getProperty('keyPassword')
+                    releaseSigningValid = true
+                } catch (Exception ignored) {
+                    // Debug builds remain usable; the release guard below fails closed.
+                }
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+}
+
+// The task graph guard only reads the eagerly configured signing state.
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.name.toLowerCase(Locale.ROOT).contains('release') } &&
+            (!releaseSigningValid || android.signingConfigs.release.storeFile == null)) {
+        throw new GradleException('Release signing properties are missing or invalid')
     }
 }
 
 dependencies {
 
-    implementation 'androidx.appcompat:appcompat:1.5.1'
-    implementation 'com.google.android.material:material:1.7.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.core:core:1.15.0'
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.4'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.0'

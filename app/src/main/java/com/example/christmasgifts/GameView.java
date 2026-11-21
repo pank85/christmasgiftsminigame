@@ -11,6 +11,7 @@ import android.graphics.Paint;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.os.Handler;
 import android.os.SystemClock;
 import android.preference.PreferenceManager;
@@ -57,7 +58,6 @@ public class GameView extends View {
     public GameView(Context context) {
         super(context);
         this.context = context;
-        setSystemUiVisibility(View.SYSTEM_UI_FLAG_HIDE_NAVIGATION);
         InitScreenSize();
         InitBitmaps();
         InitRest();
@@ -187,11 +187,18 @@ public class GameView extends View {
     }
 
     private void InitScreenSize() {
-        Display display = ((Activity) getContext()).getWindowManager().getDefaultDisplay();
-        Point size = new Point();
-        display.getSize(size);
-        dWidth = size.x;
-        dHeight = size.y;
+        Activity activity = (Activity) getContext();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Rect bounds = activity.getWindowManager().getCurrentWindowMetrics().getBounds();
+            dWidth = bounds.width();
+            dHeight = bounds.height();
+        } else {
+            Display display = activity.getWindowManager().getDefaultDisplay();
+            Point size = new Point();
+            display.getRealSize(size);
+            dWidth = size.x;
+            dHeight = size.y;
+        }
         gameViewTop = dHeight / 20;
     }
 

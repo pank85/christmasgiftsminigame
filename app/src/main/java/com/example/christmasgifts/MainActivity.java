@@ -1,6 +1,9 @@
 package com.example.christmasgifts;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import android.os.Bundle;
 import android.preference.PreferenceManager;
@@ -17,6 +20,8 @@ public class MainActivity extends AppCompatActivity {
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        hideSystemBars();
         if (getSupportActionBar()!=null)
             getSupportActionBar().hide();
         setContentView(R.layout.activity_main);
@@ -25,6 +30,20 @@ public class MainActivity extends AppCompatActivity {
         TextView menuHighScore = findViewById(R.id.menu_high_score);
         menuHighScore.setText(getString(R.string.menu_high_score_fmt, highScore));
         addListeners();
+    }
+
+    private void hideSystemBars() {
+        WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        controller.setSystemBarsBehavior(
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        controller.hide(WindowInsetsCompat.Type.systemBars());
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) hideSystemBars();
     }
 
     private void addListeners() {
