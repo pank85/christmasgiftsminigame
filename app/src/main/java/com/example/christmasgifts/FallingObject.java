@@ -13,33 +13,31 @@ public class FallingObject {
     private Bitmap image;
     private  FallingObjectType fallingObjectType;
 
-    public void InitializeAsPresent(double speedMultiplier,Bitmap img){
+    public void InitializeAsPresent(double speedMultiplier, Bitmap img, float spawnX, float spawnY){
         fallingObjectType=FallingObjectType.PRESENT;
         Random random = new Random();
         this.image= img;
-        int availableWidth = GameView.dWidth - getWidth();
-        position_x = availableWidth > 0 ? random.nextInt(availableWidth) : 0;
-        position_y=2;
-        int initialSpeed=GameView.dWidth/250;
+        position_x = spawnX;
+        position_y = spawnY;
+        int initialSpeed=Math.max(1, GameView.dWidth/250);
         int maxExtraSpeed=initialSpeed/2+1;
         speed=(float) Math.ceil( speedMultiplier * (double) random.nextInt(maxExtraSpeed)+initialSpeed);
     }
 
-    public void InitializeAsBomb(double speedMultiplier,Bitmap img){
+    public void InitializeAsBomb(double speedMultiplier, Bitmap img, float spawnX, float spawnY){
         fallingObjectType=FallingObjectType.BOMB;
         this.image= img;
         Random random = new Random();
-        int availableWidth = GameView.dWidth - getWidth();
-        position_x = availableWidth > 0 ? random.nextInt(availableWidth) : 0;
-        position_y=2;
-        int initialSpeed=GameView.dWidth/250;
+        position_x = spawnX;
+        position_y = spawnY;
+        int initialSpeed=Math.max(1, GameView.dWidth/250);
         speedMultiplier+=3;
         int maxExtraSpeed=initialSpeed/2+1;
         speed=(float) Math.ceil( speedMultiplier * (double) random.nextInt(maxExtraSpeed)+initialSpeed);
     }
 
-    public void InitializeAsSnowflake(double speedMultiplier, Bitmap img) {
-        InitializeAsPresent(speedMultiplier, img);
+    public void InitializeAsSnowflake(double speedMultiplier, Bitmap img, float spawnX, float spawnY) {
+        InitializeAsPresent(speedMultiplier, img, spawnX, spawnY);
         fallingObjectType = FallingObjectType.SNOWFLAKE;
     }
 

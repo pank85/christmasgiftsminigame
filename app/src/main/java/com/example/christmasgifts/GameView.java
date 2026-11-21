@@ -15,6 +15,8 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.SystemClock;
 import android.preference.PreferenceManager;
+import android.text.TextPaint;
+import android.text.TextUtils;
 import android.view.Display;
 import android.view.MotionEvent;
 import android.view.View;
@@ -23,7 +25,9 @@ import androidx.appcompat.content.res.AppCompatResources;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.res.ResourcesCompat;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
@@ -32,11 +36,14 @@ public class GameView extends View {
     private final Context context;
     static int dWidth, dHeight, gameViewTop;
     private float basketX, basketY, oldX, oldBasketX;
-    private Bitmap basket, ground, background, bombImg, snowflakeImg, explosionBitmap, explosion;
+    private Bitmap basket, ground, background, bombImg, snowflakeImg, explosionBitmap, explosion, santa;
+    private float santaX, santaY;
+    private int santaDir = 1;
+    private float hudFirstBaseline, hudSecondBaseline, hudBottom;
     private Rect rectBackground, rectGround;
     private Handler handler;
     private Runnable runnableFallingPresents, runnableNewPresents, gameOverRunnable;
-    private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Paint speckPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint effectPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final float[] speckX = new float[12], speckY = new float[12], speckSpeed = new float[12];
@@ -45,6 +52,18 @@ public class GameView extends View {
     private long burstStartMs, explosionStartMs;
     private final Random random = new Random();
     private final List<FallingObject> fallingObjects = new ArrayList<>();
+    private final Deque<PendingThrow> pendingThrows = new ArrayDeque<>();
+
+    private static class PendingThrow {
+        final FallingObjectType type;
+        final Bitmap image;
+        final double speedMultiplier;
+        PendingThrow(FallingObjectType type, Bitmap image, double speedMultiplier) {
+            this.type = type;
+            this.image = image;
+            this.speedMultiplier = speedMultiplier;
+        }
+    }
     private final List<Bitmap> presentImages = new ArrayList<>();
     private final int moveObjectPeriod = 10;
     private int addNewObjectPeriod = 2000;
@@ -59,24 +78,25 @@ public class GameView extends View {
         super(context);
         this.context = context;
         InitScreenSize();
-        InitBitmaps();
         InitRest();
+        InitBitmaps();
         Start();
     }
 
     private void InitRest() {
         textPaint.setColor(ContextCompat.getColor(context, R.color.festive_cream));
-        textPaint.setTextSize(50);
+        textPaint.setTextSize(Math.max(1, Math.min(50, gameViewTop / 4f)));
         textPaint.setTypeface(ResourcesCompat.getFont(context, R.font.winter_snow_regular));
         textPaint.setStyle(Paint.Style.FILL);
+        sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
+        highScore = sharedPreferences.getInt(context.getString(R.string.high_score), 0);
+        fitHud();
         speckPaint.setColor(Color.WHITE);
         for (int i = 0; i < speckX.length; i++) {
             speckX[i] = random.nextFloat() * dWidth;
-            speckY[i] = gameViewTop + random.nextFloat() * (dHeight - gameViewTop);
+            speckY[i] = hudBottom + 3 + random.nextFloat() * Math.max(0, dHeight - hudBottom - 3);
             speckSpeed[i] = 0.5f + random.nextFloat();
         }
-        sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
-        highScore = sharedPreferences.getInt(context.getString(R.string.high_score), 0);
     }
 
     private void Start() {
@@ -112,12 +132,15 @@ public class GameView extends View {
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        canvas.drawBitmap(background, null, rectBackground, null);
-        canvas.drawBitmap(ground, null, rectGround, null);
+        fitHud();
+        updateSantaLayout();
+        drawCenterCrop(canvas, background, rectBackground);
+        drawCenterCrop(canvas, ground, rectGround);
+        canvas.drawBitmap(santa, santaX, santaY, null);
         for (int i = 0; i < speckX.length; i++) {
-            canvas.drawCircle(speckX[i], speckY[i], 3, speckPaint);
+            canvas.drawCircle(speckX[i], Math.max(hudBottom + 3, speckY[i]), 3, speckPaint);
             speckY[i] += speckSpeed[i];
-            if (speckY[i] > dHeight) speckY[i] = gameViewTop - 4;
+            if (speckY[i] > dHeight) speckY[i] = hudBottom + 3;
         }
         long now = SystemClock.uptimeMillis();
         if (explosion != null) {
@@ -132,9 +155,13 @@ public class GameView extends View {
             effectPaint.setAlpha(255);
             postInvalidateOnAnimation();
         } else {
-            canvas.drawBitmap(basket, basketX, basketY, null);
+            drawCenterCrop(canvas, basket, new Rect((int) basketX, (int) basketY,
+                    (int) basketX + basket.getWidth(), (int) basketY + basket.getHeight()));
+            canvas.save();
+            canvas.clipRect(0, hudBottom, dWidth, dHeight);
             for (FallingObject item : fallingObjects)
                 canvas.drawBitmap(item.getImage(), item.getPosition_x(), item.getPosition_y(), null);
+            canvas.restore();
         }
         long burstAge = now - burstStartMs;
         if (burstCount > 0 && burstAge < 400) {
@@ -147,14 +174,48 @@ public class GameView extends View {
             }
             speckPaint.setAlpha(255);
         }
+        String[] labels = {"score: " + score, "high score: " + highScore,
+                "lives: " + getRemainingLives(), combo > 1 ? "combo x" + combo : ""};
+        float padding = Math.max(4f, dWidth / 20f);
+        float gap = padding;
+        float columnWidth = Math.max(0, (dWidth - 2 * padding - gap) / 2f);
+        float rightX = padding + columnWidth + gap;
         textPaint.setColor(ContextCompat.getColor(context, R.color.festive_cream));
-        canvas.drawText("score: " + score, dWidth / 20f, gameViewTop, textPaint);
-        canvas.drawText("high score: " + highScore, dWidth / 2f, gameViewTop, textPaint);
-        canvas.drawText("lives: " + getRemainingLives(), dWidth / 20f, gameViewTop + 50, textPaint);
+        canvas.drawText(TextUtils.ellipsize(labels[0], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), padding, hudFirstBaseline, textPaint);
+        canvas.drawText(TextUtils.ellipsize(labels[1], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), rightX, hudFirstBaseline, textPaint);
+        canvas.drawText(TextUtils.ellipsize(labels[2], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), padding, hudSecondBaseline, textPaint);
         if (combo > 1) {
             textPaint.setColor(ContextCompat.getColor(context, R.color.festive_gold));
-            canvas.drawText("combo x" + combo, dWidth / 2f, gameViewTop + 50, textPaint);
+            canvas.drawText(TextUtils.ellipsize(labels[3], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), rightX, hudSecondBaseline, textPaint);
         }
+    }
+
+    private void fitHud() {
+        String[] labels = {"score: " + score, "high score: " + highScore,
+                "lives: " + getRemainingLives(), combo > 1 ? "combo x" + combo : ""};
+        float padding = Math.max(4f, dWidth / 20f);
+        float columnWidth = Math.max(0, (dWidth - 3 * padding) / 2f);
+        float size = Math.max(8f, Math.min(50f, gameViewTop / 4f));
+        while (true) {
+            textPaint.setTextSize(size);
+            boolean fits = true;
+            for (String label : labels) if (textPaint.measureText(label) > columnWidth) fits = false;
+            if (fits || size <= 8f) break;
+            size = Math.max(8f, size - 1f);
+        }
+        Paint.FontMetrics fm = textPaint.getFontMetrics();
+        hudFirstBaseline = -fm.ascent;
+        hudSecondBaseline = hudFirstBaseline + fm.descent - fm.ascent;
+        hudBottom = Math.max(1f, Math.min(gameViewTop, hudSecondBaseline + fm.descent + 4f));
+    }
+
+    private void updateSantaLayout() {
+        int side = Math.max(1, Math.min(Math.min(dWidth / 5, dHeight / 8),
+                (int) (basketY - hudBottom - 1)));
+        if (santa == null || santa.getWidth() != side)
+            santa = bitmapFromDrawable(R.drawable.santa, side, side);
+        santaY = hudBottom;
+        santaX = Math.max(0, Math.min(santaX, dWidth - santa.getWidth()));
     }
 
     private boolean checkGameOver() { return getRemainingLives() == 0 || explosion != null; }
@@ -199,7 +260,7 @@ public class GameView extends View {
             dWidth = size.x;
             dHeight = size.y;
         }
-        gameViewTop = dHeight / 20;
+        gameViewTop = dHeight / 5;
     }
 
     private Bitmap bitmapFromDrawable(int resId, int width, int height) {
@@ -211,23 +272,54 @@ public class GameView extends View {
         return bitmap;
     }
 
+    private void drawCenterCrop(Canvas canvas, Bitmap bitmap, Rect destination) {
+        if (destination.width() <= 0 || destination.height() <= 0) return;
+        float scale = Math.max((float) destination.width() / bitmap.getWidth(),
+                (float) destination.height() / bitmap.getHeight());
+        float sourceWidth = destination.width() / scale;
+        float sourceHeight = destination.height() / scale;
+        float left = (bitmap.getWidth() - sourceWidth) / 2f;
+        float top = (bitmap.getHeight() - sourceHeight) / 2f;
+        Rect source = new Rect(Math.max(0, (int) left), Math.max(0, (int) top),
+                Math.min(bitmap.getWidth(), (int) Math.ceil(left + sourceWidth)),
+                Math.min(bitmap.getHeight(), (int) Math.ceil(top + sourceHeight)));
+        canvas.drawBitmap(bitmap, source, destination, null);
+    }
+
+    private Bitmap intrinsicBitmap(int resId) {
+        Drawable drawable = AppCompatResources.getDrawable(context, resId);
+        if (drawable == null) throw new IllegalStateException("Missing drawable: " + resId);
+        return bitmapFromDrawable(resId, drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight());
+    }
+
     private void InitBitmaps() {
         rectBackground = new Rect(0, gameViewTop, dWidth, dHeight - dHeight / 10);
         rectGround = new Rect(0, dHeight - dHeight / 10, dWidth, dHeight);
-        background = bitmapFromDrawable(R.drawable.bg_play, dWidth, rectBackground.height());
-        ground = bitmapFromDrawable(R.drawable.ground_snow, dWidth, rectGround.height());
-        basket = bitmapFromDrawable(R.drawable.sleigh, dWidth / 5, dHeight / 10);
+        background = intrinsicBitmap(R.drawable.bg_play);
+        ground = intrinsicBitmap(R.drawable.ground_snow);
+        int basketSide = Math.max(1, Math.min(dWidth / 5, dHeight / 10));
+        Bitmap sleighSource = intrinsicBitmap(R.drawable.sleigh);
+        basket = Bitmap.createBitmap(basketSide, basketSide, Bitmap.Config.ARGB_8888);
+        drawCenterCrop(new Canvas(basket), sleighSource, new Rect(0, 0, basketSide, basketSide));
+        santaX = 0;
         basketX = (dWidth - basket.getWidth()) / 2f;
         basketY = rectGround.top - basket.getHeight();
-        presentImages.add(bitmapFromDrawable(R.drawable.gift_red, dWidth / 8, dHeight / 8));
-        presentImages.add(bitmapFromDrawable(R.drawable.gift_gold, dWidth / 8, dHeight / 8));
-        presentImages.add(bitmapFromDrawable(R.drawable.gift_green, dWidth / 8, dHeight / 8));
-        snowflakeImg = bitmapFromDrawable(R.drawable.snowflake, dWidth / 8, dHeight / 8);
-        bombImg = bitmapFromDrawable(R.drawable.bomb_ornament, dWidth / 8, dHeight / 8);
+        updateSantaLayout();
+        int objectSide = Math.max(1, Math.min(dWidth, dHeight) / 8);
+        presentImages.add(bitmapFromDrawable(R.drawable.gift_red, objectSide, objectSide));
+        presentImages.add(bitmapFromDrawable(R.drawable.gift_gold, objectSide, objectSide));
+        presentImages.add(bitmapFromDrawable(R.drawable.gift_green, objectSide, objectSide));
+        snowflakeImg = bitmapFromDrawable(R.drawable.snowflake, objectSide, objectSide);
+        bombImg = bitmapFromDrawable(R.drawable.bomb_ornament, objectSide, objectSide);
         explosionBitmap = bitmapFromDrawable(R.drawable.explosion_burst, basket.getWidth() * 2, basket.getWidth() * 2);
     }
 
     private void handleFallingObjects() {
+        float maxX = Math.max(0, dWidth - santa.getWidth());
+        santaX += santaDir * Math.max(1, dWidth / 150);
+        if (santaX >= maxX) { santaX = maxX; santaDir = -1; }
+        else if (santaX <= 0) { santaX = 0; santaDir = 1; }
+        releasePendingThrow();
         for (FallingObject item : fallingObjects) item.setPosition_y(item.getPosition_y() + item.getSpeed());
         checkIfCollected();
         checkIfLeftTheScreen();
@@ -235,31 +327,57 @@ public class GameView extends View {
 
     private void addNewFallingObject() { addNewPresent(); addNewBomb(); }
 
+    private float spawnX(Bitmap image) {
+        return Math.max(0, Math.min(dWidth - image.getWidth(),
+                santaX + santa.getWidth() * 17f / 24f - image.getWidth() / 2f));
+    }
+
+    private float spawnY() { return santaY + santa.getHeight() * 19f / 24f; }
+
+    private void releasePendingThrow() {
+        PendingThrow pending = pendingThrows.peekFirst();
+        if (pending == null) return;
+        float x = spawnX(pending.image), y = spawnY();
+        for (FallingObject live : fallingObjects) {
+            if (x < live.getPosition_x() + live.getWidth()
+                    && x + pending.image.getWidth() > live.getPosition_x()) return;
+        }
+        FallingObject item = new FallingObject();
+        if (pending.type == FallingObjectType.BOMB) item.InitializeAsBomb(pending.speedMultiplier, pending.image, x, y);
+        else if (pending.type == FallingObjectType.SNOWFLAKE) item.InitializeAsSnowflake(pending.speedMultiplier, pending.image, x, y);
+        else item.InitializeAsPresent(pending.speedMultiplier, pending.image, x, y);
+        pendingThrows.removeFirst();
+        fallingObjects.add(item);
+    }
+
     private void addNewPresent() {
-        long countPresents = fallingObjects.stream().filter(f -> f.getFallingObjectType() == FallingObjectType.PRESENT).count();
+        long countPresents = fallingObjects.stream().filter(f -> f.getFallingObjectType() == FallingObjectType.PRESENT).count()
+                + pendingThrows.stream().filter(f -> f.type == FallingObjectType.PRESENT).count();
         long limit = (long) (3 + 2 * Math.floor(presentSpeedMultiplier));
-        if (countPresents <= limit && (random.nextInt(5) == 1 || fallingObjects.isEmpty())) {
+        if (countPresents <= limit && (random.nextInt(5) == 1 || (fallingObjects.isEmpty() && pendingThrows.isEmpty()))) {
             int presentsToAdd = random.nextInt(2) + 1;
             for (int i = 0; i < presentsToAdd; i++) {
-                FallingObject item = new FallingObject();
-                boolean hasSnowflake = fallingObjects.stream().anyMatch(f -> f.getFallingObjectType() == FallingObjectType.SNOWFLAKE);
-                if (!hasSnowflake && random.nextFloat() < 0.12f) item.InitializeAsSnowflake(presentSpeedMultiplier, snowflakeImg);
-                else item.InitializeAsPresent(presentSpeedMultiplier, presentImages.get(random.nextInt(3)));
-                fallingObjects.add(item);
+                boolean hasSnowflake = fallingObjects.stream().anyMatch(f -> f.getFallingObjectType() == FallingObjectType.SNOWFLAKE)
+                        || pendingThrows.stream().anyMatch(f -> f.type == FallingObjectType.SNOWFLAKE);
+                if (!hasSnowflake && random.nextFloat() < 0.12f)
+                    pendingThrows.addLast(new PendingThrow(FallingObjectType.SNOWFLAKE, snowflakeImg, presentSpeedMultiplier));
+                else {
+                    Bitmap image = presentImages.get(random.nextInt(3));
+                    pendingThrows.addLast(new PendingThrow(FallingObjectType.PRESENT, image, presentSpeedMultiplier));
+                }
             }
         }
     }
 
     private void addNewBomb() {
-        long countBombs = fallingObjects.stream().filter(f -> f.getFallingObjectType() == FallingObjectType.BOMB).count();
+        long countBombs = fallingObjects.stream().filter(f -> f.getFallingObjectType() == FallingObjectType.BOMB).count()
+                + pendingThrows.stream().filter(f -> f.type == FallingObjectType.BOMB).count();
         long limit = (long) Math.floor(presentSpeedMultiplier);
         if (countBombs <= limit && random.nextInt(15) == 1) {
             long bombsToAdd = random.nextInt(2) + 1;
             if (bombsToAdd + countBombs > limit) bombsToAdd = limit - countBombs;
             for (long i = 0; i < bombsToAdd; i++) {
-                FallingObject bomb = new FallingObject();
-                bomb.InitializeAsBomb(presentSpeedMultiplier, bombImg);
-                fallingObjects.add(bomb);
+                pendingThrows.addLast(new PendingThrow(FallingObjectType.BOMB, bombImg, presentSpeedMultiplier));
             }
         }
     }
