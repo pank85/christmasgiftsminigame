@@ -17,7 +17,8 @@ public class FallingObject {
         fallingObjectType=FallingObjectType.PRESENT;
         Random random = new Random();
         this.image= img;
-        position_x= random.nextInt(GameView.dWidth- getWidth());
+        int availableWidth = GameView.dWidth - getWidth();
+        position_x = availableWidth > 0 ? random.nextInt(availableWidth) : 0;
         position_y=2;
         int initialSpeed=GameView.dWidth/250;
         int maxExtraSpeed=initialSpeed/2+1;
@@ -28,12 +29,36 @@ public class FallingObject {
         fallingObjectType=FallingObjectType.BOMB;
         this.image= img;
         Random random = new Random();
-        position_x= random.nextInt(GameView.dWidth- getWidth());
+        int availableWidth = GameView.dWidth - getWidth();
+        position_x = availableWidth > 0 ? random.nextInt(availableWidth) : 0;
         position_y=2;
         int initialSpeed=GameView.dWidth/250;
         speedMultiplier+=3;
         int maxExtraSpeed=initialSpeed/2+1;
         speed=(float) Math.ceil( speedMultiplier * (double) random.nextInt(maxExtraSpeed)+initialSpeed);
+    }
+
+    public void InitializeAsSnowflake(double speedMultiplier, Bitmap img) {
+        InitializeAsPresent(speedMultiplier, img);
+        fallingObjectType = FallingObjectType.SNOWFLAKE;
+    }
+
+    public int getScoreValue() {
+        switch (fallingObjectType) {
+            case PRESENT:
+                return 1;
+            default:
+                return 0;
+        }
+    }
+
+    public boolean costsLifeIfMissed() {
+        switch (fallingObjectType) {
+            case PRESENT:
+                return true;
+            default:
+                return false;
+        }
     }
 
     public FallingObjectType getFallingObjectType() {

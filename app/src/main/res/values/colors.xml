@@ -7,4 +7,10 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="festive_red">#C62828</color>
+    <color name="festive_green">#1B5E20</color>
+    <color name="festive_gold">#FFD54F</color>
+    <color name="festive_cream">#FFF8E1</color>
+    <color name="festive_night">#0B1D36</color>
+    <color name="festive_pine">#1B4332</color>
 </resources>

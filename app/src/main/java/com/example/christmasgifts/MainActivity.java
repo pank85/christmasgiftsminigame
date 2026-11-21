@@ -3,11 +3,11 @@ package com.example.christmasgifts;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.os.Bundle;
-import android.view.View;
+import android.preference.PreferenceManager;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
-import android.widget.ImageButton;
+import android.widget.TextView;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -20,14 +20,16 @@ public class MainActivity extends AppCompatActivity {
         if (getSupportActionBar()!=null)
             getSupportActionBar().hide();
         setContentView(R.layout.activity_main);
+        int highScore = PreferenceManager.getDefaultSharedPreferences(this)
+                .getInt(getString(R.string.high_score), 0);
+        TextView menuHighScore = findViewById(R.id.menu_high_score);
+        menuHighScore.setText(getString(R.string.menu_high_score_fmt, highScore));
         addListeners();
     }
 
     private void addListeners() {
         Button startButton = findViewById(R.id.btn_start);
         startButton.setOnClickListener(view -> startGame());
-//        ImageButton exitButton = findViewById(R.id.btn_exit);
-//        exitButton.setOnClickListener(view -> finishAndRemoveTask());
     }
 
 

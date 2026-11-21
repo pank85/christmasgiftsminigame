@@ -1,7 +1,6 @@
 package com.example.christmasgifts;
 
 import android.content.Intent;
-import android.graphics.Color;
 import android.os.Bundle;
 import android.view.Window;
 import android.view.WindowManager;
@@ -27,14 +26,13 @@ public class GameOver extends AppCompatActivity {
         Intent intent=getIntent();
         int score=intent.getIntExtra(getString(R.string.score),0);
         int highScore=intent.getIntExtra(getString(R.string.high_score),0);
-        if(score==0 && highScore==0)
-            reStartGame();
+        int comboPeak = intent.getIntExtra(getString(R.string.combo_peak), 0);
         tvScore=findViewById(R.id.score);
         tvHighScore=findViewById(R.id.highScore);
-        tvScore.setTextColor(Color.RED);
-        tvHighScore.setTextColor(Color.RED);
-        tvScore.setText(String.format( "Score: %s",score));
-        tvHighScore.setText(String.format("High Score: %s",highScore));
+        TextView tvComboPeak = findViewById(R.id.combo_peak);
+        tvScore.setText(getString(R.string.score_fmt, score));
+        tvHighScore.setText(getString(R.string.high_score_fmt, highScore));
+        tvComboPeak.setText(getString(R.string.combo_peak_fmt, comboPeak));
 
         addListeners();
     }
