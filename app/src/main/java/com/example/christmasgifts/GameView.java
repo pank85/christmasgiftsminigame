@@ -165,7 +165,6 @@ public class GameView extends View {
         if (santa == null || gameOverRunnable != null) return true;
         if (event.getAction() == MotionEvent.ACTION_DOWN || event.getAction() == MotionEvent.ACTION_MOVE) {
             santaX = touchX - santa.getWidth() / 2f;
-            santaY = touchY - santa.getHeight() / 2f;
             clampSanta();
             postInvalidate();
         }
@@ -328,16 +327,22 @@ public class GameView extends View {
             santa = bitmapFromDrawable(R.drawable.santa, side, side);
         if (!santaPlaced) {
             santaX = (dWidth - santa.getWidth()) / 2f;
-            santaY = dHeight - santa.getHeight() - Math.max(4f, dHeight / 40f);
+            santaY = santaGroundY();
             santaPlaced = true;
         }
         clampSanta();
     }
 
+    /** Top of the Santa bitmap on the fixed bottom ground line. */
+    private float santaGroundY() {
+        if (santa == null) return 0f;
+        return dHeight - santa.getHeight() - Math.max(4f, dHeight / 40f);
+    }
+
     private void clampSanta() {
         if (santa == null) return;
         santaX = Math.max(0, Math.min(dWidth - santa.getWidth(), santaX));
-        santaY = Math.max(hudBottom, Math.min(dHeight - santa.getHeight(), santaY));
+        santaY = santaGroundY();
     }
 
     private boolean checkGameOver() { return runWon || getRemainingLives() == 0 || explosion != null; }
@@ -441,7 +446,6 @@ public class GameView extends View {
         fitHud();
         float oldSantaBottom = santa == null ? 0 : santaY + santa.getHeight();
         float oldSantaXFraction = oldw > 0 ? santaX / oldw : 0.5f;
-        float oldSantaYFraction = oldh > 0 ? santaY / oldh : 0.8f;
         float oldElfFraction = oldw > 0 ? elfX / oldw : 0.5f;
         List<Bitmap> oldPresentImages = new ArrayList<>(presentImages);
         presentImages.clear();
@@ -451,7 +455,6 @@ public class GameView extends View {
         treeStep = -1;
         InitBitmaps();
         santaX = oldSantaXFraction * w;
-        santaY = oldSantaYFraction * h;
         santaPlaced = true;
         fitHud();
         updateSantaLayout();
@@ -562,12 +565,29 @@ public class GameView extends View {
     }
 
     private Rect treeRect() {
-        int w = Math.max(1, dWidth / 3);
-        int h = Math.max(1, dHeight / 3);
-        int x = (dWidth - w) / 2;
-        int bottom = dHeight;
-        int top = Math.max((int) hudBottom, bottom - h);
-        return new Rect(x, top, x + w, bottom);
+        Rect dest = rectBackground != null ? rectBackground
+                : new Rect(0, gameViewTop, dWidth, dHeight - dHeight / 10);
+        int bmpW = background != null ? background.getWidth() : 768;
+        int bmpH = background != null ? background.getHeight() : 1376;
+        float scale = Math.max((float) dest.width() / bmpW, (float) dest.height() / bmpH);
+        float sourceWidth = dest.width() / scale;
+        float sourceHeight = dest.height() / scale;
+        float left = (bmpW - sourceWidth) / 2f;
+        float top = (bmpH - sourceHeight) / 2f;
+        float srcX = bmpW * (384f / 768f);
+        float srcY = bmpH * (1000f / 1376f);
+        float screenX = dest.left + (srcX - left) * scale;
+        float screenY = dest.top + (srcY - top) * scale;
+        int playTop = (int) Math.ceil(hudBottom);
+        int playBottom = dHeight - dHeight / 10;
+        int side = Math.max(1, (Math.max(1, dWidth / 5) + Math.max(1, dWidth / 4)) / 2);
+        side = Math.min(side, Math.max(1, playBottom - playTop));
+        side = Math.min(side, Math.max(1, dWidth));
+        int x = Math.round(screenX - side / 2f);
+        int y = Math.round(screenY - side / 2f);
+        x = Math.max(0, Math.min(x, Math.max(0, dWidth - side)));
+        y = Math.max(playTop, Math.min(y, Math.max(playTop, playBottom - side)));
+        return new Rect(x, y, x + side, y + side);
     }
 
     private void ensureCheckpointFrames() {
