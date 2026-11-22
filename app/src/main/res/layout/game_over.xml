@@ -41,6 +41,22 @@
         android:padding="16dp">
 
         <TextView
+            android:id="@+id/result_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/winter_snow_regular"
+            android:textColor="@color/festive_cream"
+            android:textSize="32sp" />
+
+        <TextView
+            android:id="@+id/level_reached"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/winter_snow_regular"
+            android:textColor="@color/festive_cream"
+            android:textSize="22sp" />
+
+        <TextView
             android:id="@+id/score"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

@@ -27,9 +27,15 @@ public class GameOver extends AppCompatActivity {
         int score=intent.getIntExtra(getString(R.string.score),0);
         int highScore=intent.getIntExtra(getString(R.string.high_score),0);
         int comboPeak = intent.getIntExtra(getString(R.string.combo_peak), 0);
+        boolean runWon = intent.getBooleanExtra(getString(R.string.run_won), false);
+        int levelReached = intent.getIntExtra(getString(R.string.level_reached), 1);
         tvScore=findViewById(R.id.score);
         tvHighScore=findViewById(R.id.highScore);
         TextView tvComboPeak = findViewById(R.id.combo_peak);
+        TextView resultTitle = findViewById(R.id.result_title);
+        TextView tvLevelReached = findViewById(R.id.level_reached);
+        resultTitle.setText(runWon ? R.string.win_title : R.string.lose_title);
+        tvLevelReached.setText(getString(R.string.level_reached_fmt, levelReached));
         tvScore.setText(getString(R.string.score_fmt, score));
         tvHighScore.setText(getString(R.string.high_score_fmt, highScore));
         tvComboPeak.setText(getString(R.string.combo_peak_fmt, comboPeak));

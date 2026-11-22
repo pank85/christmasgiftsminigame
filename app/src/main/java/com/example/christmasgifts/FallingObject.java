@@ -25,7 +25,7 @@ public class FallingObject {
         position_y = spawnY;
         int initialSpeed=Math.max(1, GameView.dWidth/250);
         int maxExtraSpeed=initialSpeed/2+1;
-        speed=(float) Math.ceil( speedMultiplier * (double) random.nextInt(maxExtraSpeed)+initialSpeed);
+        speed=(float) (speedMultiplier * (initialSpeed + random.nextInt(maxExtraSpeed)));
     }
 
     public void InitializeAsBomb(double speedMultiplier, Bitmap img, float spawnX, float spawnY){
@@ -36,9 +36,8 @@ public class FallingObject {
         position_x = spawnX;
         position_y = spawnY;
         int initialSpeed=Math.max(1, GameView.dWidth/250);
-        speedMultiplier+=3;
         int maxExtraSpeed=initialSpeed/2+1;
-        speed=(float) Math.ceil( speedMultiplier * (double) random.nextInt(maxExtraSpeed)+initialSpeed);
+        speed=(float) (speedMultiplier * (initialSpeed + 4 * random.nextInt(maxExtraSpeed)));
         baseSpeed = speed;
         remainingReactionTicks = 40;
     }
