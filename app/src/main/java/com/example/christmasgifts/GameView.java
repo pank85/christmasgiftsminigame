@@ -101,7 +101,7 @@ public class GameView extends View {
     private final int moveObjectPeriod = 10;
     private int level = 1, levelCaught, stock = -1;
     private boolean runWon;
-    private int score, combo, comboPeak, bonusLives, missedPresents, highScore;
+    private int score, combo, comboPeak, missedPresents, highScore;
     private long lastPresentCatchMs;
     private SharedPreferences sharedPreferences;
     private Bitmap sleighFrame, treeFrame;
@@ -249,7 +249,7 @@ public class GameView extends View {
         }
         canvas.restore();
         String[] labels = {"Level " + level, "Caught: " + levelCaught + "/" + LevelTable.quota(level),
-                "Lives: " + getRemainingLives(), "Score: " + score};
+                "Missed: " + missedPresents + "/3", "Score: " + score};
         float padding = Math.max(4f, dWidth / 20f);
         float gap = padding;
         float columnWidth = Math.max(0, (dWidth - 2 * padding - gap) / 2f);
@@ -293,8 +293,8 @@ public class GameView extends View {
         int quota = LevelTable.quota(level);
         String[] rows = {
                 "Score: " + score,
-                "Caught: " + levelCaught,
-                "Total: " + quota,
+                "Caught: " + levelCaught + "/" + quota,
+                "Missed: " + missedPresents + "/3",
                 "Combo: " + comboPeak
         };
         float inner = cardRight - cardLeft - 2 * pad;
@@ -353,10 +353,19 @@ public class GameView extends View {
         clampSanta();
     }
 
+    private int groundHeight() {
+        return Math.max(1, dHeight / 6);
+    }
+
+    private int groundTop() {
+        return dHeight - groundHeight();
+    }
+
     /** Top of the Santa bitmap on the fixed bottom ground line. */
     private float santaGroundY() {
         if (santa == null) return 0f;
-        return dHeight - santa.getHeight() - Math.max(4f, dHeight / 40f);
+        float feetY = groundTop() + groundHeight() * 0.48f;
+        return Math.max(hudBottom, feetY - santa.getHeight());
     }
 
     private void clampSanta() {
@@ -365,7 +374,7 @@ public class GameView extends View {
         santaY = santaGroundY();
     }
 
-    private boolean checkGameOver() { return runWon || getRemainingLives() == 0 || explosion != null; }
+    private boolean checkGameOver() { return runWon || explosion != null; }
 
     private void gameOver() {
         if (gameOverRunnable != null) return;
@@ -564,8 +573,8 @@ public class GameView extends View {
     }
 
     private void InitBitmaps() {
-        rectBackground = new Rect(0, gameViewTop, dWidth, dHeight - dHeight / 10);
-        rectGround = new Rect(0, dHeight - dHeight / 10, dWidth, dHeight);
+        rectBackground = new Rect(0, gameViewTop, dWidth, groundTop());
+        rectGround = new Rect(0, groundTop(), dWidth, dHeight);
         background = intrinsicBitmap(R.drawable.bg_play);
         ground = intrinsicBitmap(R.drawable.ground_snow);
         updateSantaLayout();
@@ -598,7 +607,7 @@ public class GameView extends View {
 
     private Rect treeRect() {
         Rect dest = rectBackground != null ? rectBackground
-                : new Rect(0, gameViewTop, dWidth, dHeight - dHeight / 10);
+                : new Rect(0, gameViewTop, dWidth, groundTop());
         int bmpW = background != null ? background.getWidth() : 768;
         int bmpH = background != null ? background.getHeight() : 1376;
         float scale = Math.max((float) dest.width() / bmpW, (float) dest.height() / bmpH);
@@ -611,7 +620,7 @@ public class GameView extends View {
         float screenX = dest.left + (srcX - left) * scale;
         float screenY = dest.top + (srcY - top) * scale;
         int playTop = (int) Math.ceil(hudBottom);
-        int playBottom = dHeight - dHeight / 10;
+        int playBottom = groundTop();
         int side = Math.max(1, (Math.max(1, dWidth / 5) + Math.max(1, dWidth / 4)) / 2);
         side = Math.min(side, Math.max(1, playBottom - playTop));
         side = Math.min(side, Math.max(1, dWidth));
@@ -725,6 +734,10 @@ public class GameView extends View {
             if (!fallingObjects.contains(entry.getKey()) || entry.getValue() <= 1) reaction.remove();
             else entry.setValue(entry.getValue() - 1);
         }
+        if (!levelComplete && explosion == null && stock <= 0
+                && pendingThrows.isEmpty() && fallingObjects.isEmpty()) {
+            finishLevel();
+        }
     }
 
     private float elfRunSpeed() {
@@ -803,36 +816,20 @@ public class GameView extends View {
     }
 
     private void addNewFallingObject() {
-        if (levelComplete || levelCaught >= LevelTable.quota(level)) return;
+        if (levelComplete || stock <= pendingPresents()) return;
         if (fallingObjects.size() + pendingThrows.size() >= 8) return;
-        int quota = LevelTable.quota(level);
-        boolean needPresent = levelCaught + inFlightPresents() < quota;
-        boolean canPresent = stock > pendingPresents();
         FallingObjectType type;
         Bitmap image;
-        if (needPresent && canPresent) {
-            if (random.nextInt(100) < LevelTable.bombChancePercent(level)) {
-                type = FallingObjectType.BOMB;
-                image = bombImg;
-            } else if (random.nextInt(100) < LevelTable.snowflakeChancePercent(level)) {
-                type = FallingObjectType.SNOWFLAKE;
-                image = snowflakeImg;
-            } else {
-                type = FallingObjectType.PRESENT;
-                image = presentImages.get(random.nextInt(presentImages.size()));
-            }
-        } else if (levelCaught < quota) {
-            if (random.nextInt(100) < LevelTable.bombChancePercent(level)) {
-                type = FallingObjectType.BOMB;
-                image = bombImg;
-            } else {
-                type = FallingObjectType.SNOWFLAKE;
-                image = snowflakeImg;
-            }
+        if (random.nextInt(100) < LevelTable.bombChancePercent(level)) {
+            type = FallingObjectType.BOMB;
+            image = bombImg;
+        } else if (random.nextInt(100) < LevelTable.snowflakeChancePercent(level)) {
+            type = FallingObjectType.SNOWFLAKE;
+            image = snowflakeImg;
         } else {
-            return;
+            type = FallingObjectType.PRESENT;
+            image = presentImages.get(random.nextInt(presentImages.size()));
         }
-        if (type == FallingObjectType.PRESENT && !canPresent) return;
         pendingThrows.addLast(new PendingThrow(type, image, LevelTable.speedMultiplier(level)));
     }
 
@@ -868,7 +865,8 @@ public class GameView extends View {
     }
 
     private float brokenPresentGroundY(Bitmap img) {
-        return dHeight - img.getHeight() - Math.max(4f, dHeight / 40f);
+        float feetY = groundTop() + groundHeight() * 0.50f;
+        return Math.max(hudBottom, feetY - img.getHeight());
     }
 
     private void checkIfLeftTheScreen() {
@@ -880,8 +878,6 @@ public class GameView extends View {
                 if (item.costsLifeIfMissed()) {
                     missedPresents++;
                     combo = 0;
-                    int cap = LevelTable.quota(level) - levelCaught;
-                    if (stock < cap) stock++;
                     int variant = Math.max(0, presentImages.indexOf(item.getImage()));
                     if (!brokenPresentImages.isEmpty()) {
                         Bitmap brokenImg = brokenPresentImages.get(Math.min(variant, brokenPresentImages.size() - 1));
@@ -928,17 +924,33 @@ public class GameView extends View {
                 comboPeak = Math.max(comboPeak, combo);
                 score += item.getScoreValue() * combo;
                 levelCaught++;
-                if (levelCaught >= LevelTable.quota(level)) {
-                    enterLevelComplete();
+            } else if (item.getFallingObjectType() == FallingObjectType.SNOWFLAKE) {
+                if (!brokenPresents.isEmpty()) {
+                    brokenPresents.remove(brokenPresents.size() - 1);
+                    missedPresents = Math.max(0, missedPresents - 1);
+                    levelCaught++;
+                    score++;
                 }
-            } else if (item.getFallingObjectType() == FallingObjectType.SNOWFLAKE && getRemainingLives() < 5) {
-                bonusLives++;
             }
             burstCount = 8;
             burstStartMs = SystemClock.uptimeMillis();
             for (int i = 0; i < burstCount; i++) { burstX[i] = center.x; burstY[i] = center.y; }
             if (levelComplete) break;
         }
+    }
+
+    private void finishLevel() {
+        if (missedPresents > 3) {
+            runWon = false;
+            gameOver();
+            return;
+        }
+        if (level >= LevelTable.LEVEL_COUNT) {
+            runWon = true;
+            gameOver();
+            return;
+        }
+        enterLevelComplete();
     }
 
     private void enterLevelComplete() {
@@ -958,6 +970,8 @@ public class GameView extends View {
         }
         level++;
         levelCaught = 0;
+        missedPresents = 0;
+        brokenPresents.clear();
         combo = 0;
         comboPeak = 0;
         stock = LevelTable.quota(level);
@@ -972,5 +986,4 @@ public class GameView extends View {
     }
 
     private int getScore() { return score; }
-    private int getRemainingLives() { return Math.max(0, Math.min(5, 3 + bonusLives - missedPresents)); }
 }
