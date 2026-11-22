@@ -52,6 +52,8 @@ public class GameView extends View {
     private boolean levelComplete;
     private long gameOverRemaining = 2000, gameOverDeadline;
     private long spawnRemaining, spawnDeadline;
+    private boolean bombRainActive;
+    private long bombRainRemaining, bombRainDeadline;
     private float hudFirstBaseline, hudSecondBaseline, hudBottom;
     private Rect rectBackground, rectGround;
     private final RectF nextLevelButton = new RectF();
@@ -108,12 +110,56 @@ public class GameView extends View {
     private int sleighStep = -1, treeStep = -1, frameWidth, frameHeight;
 
     public GameView(Context context) {
+        this(context, 1);
+    }
+
+    public GameView(Context context, int startLevel) {
         super(context);
         this.context = context;
+        this.level = startLevel >= 1 && startLevel <= LevelTable.LEVEL_COUNT ? startLevel : 1;
         InitScreenSize();
         InitRest();
         InitBitmaps();
         Start();
+        resetBombRain();
+    }
+
+    private void resetBombRain() {
+        bombRainActive = false;
+        bombRainDeadline = 0;
+        bombRainRemaining = LevelTable.hasBombRain(level) ? LevelTable.bombRainIntervalMs(level) : 0;
+    }
+
+    private void armBombRain() {
+        if (!LevelTable.hasBombRain(level)) {
+            bombRainActive = false;
+            bombRainDeadline = 0;
+            bombRainRemaining = 0;
+            return;
+        }
+        if (bombRainDeadline != 0) return;
+        bombRainDeadline = SystemClock.uptimeMillis() + Math.max(0, bombRainRemaining);
+    }
+
+    private void tickBombRain(long now) {
+        if (!LevelTable.hasBombRain(level) || stock <= 0) {
+            bombRainActive = false;
+            return;
+        }
+        if (bombRainDeadline == 0 || now < bombRainDeadline) return;
+        if (!bombRainActive) {
+            bombRainActive = true;
+            bombRainRemaining = LevelTable.bombRainDurationMs(level);
+        } else {
+            bombRainActive = false;
+            bombRainRemaining = LevelTable.bombRainIntervalMs(level);
+        }
+        bombRainDeadline = now + bombRainRemaining;
+    }
+
+    private long currentSpawnPeriodMs() {
+        if (bombRainActive && LevelTable.hasBombRain(level)) return LevelTable.bombRainSpawnPeriodMs(level);
+        return LevelTable.spawnPeriodMs(level);
     }
 
     private void InitRest() {
@@ -149,6 +195,7 @@ public class GameView extends View {
         };
         runnableNewPresents = () -> {
             if (!running || levelComplete) return;
+            tickBombRain(SystemClock.uptimeMillis());
             addNewFallingObject();
             postInvalidate();
             if (levelComplete) {
@@ -156,7 +203,7 @@ public class GameView extends View {
                 return;
             }
             if (!checkGameOver()) {
-                spawnRemaining = LevelTable.spawnPeriodMs(level);
+                spawnRemaining = currentSpawnPeriodMs();
                 scheduleSpawn();
             }
         };
@@ -267,7 +314,33 @@ public class GameView extends View {
         canvas.drawText(TextUtils.ellipsize(labels[1], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), rightX, hudFirstBaseline, textPaint);
         canvas.drawText(TextUtils.ellipsize(labels[2], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), padding, hudSecondBaseline, textPaint);
         canvas.drawText(TextUtils.ellipsize(labels[3], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), rightX, hudSecondBaseline, textPaint);
+        if (bombRainActive) drawBombRainBanner(canvas);
         if (levelComplete) drawLevelCard(canvas);
+    }
+
+    private void drawBombRainBanner(Canvas canvas) {
+        float savedSize = textPaint.getTextSize();
+        int savedColor = textPaint.getColor();
+        String banner = "BOMB RAIN!";
+        textPaint.setTextSize(Math.max(18f, Math.min(42f, dWidth / 12f)));
+        textPaint.setColor(ContextCompat.getColor(context, R.color.festive_cream));
+        float textWidth = textPaint.measureText(banner);
+        Paint.FontMetrics fm = textPaint.getFontMetrics();
+        float bannerH = fm.descent - fm.ascent + 16f;
+        float bannerW = textWidth + 32f;
+        float left = (dWidth - bannerW) / 2f;
+        float top = hudBottom + 6f;
+        hudPaint.setStyle(Paint.Style.FILL);
+        hudPaint.setColor(ContextCompat.getColor(context, R.color.festive_red));
+        hudPaint.setAlpha(255);
+        canvas.drawRoundRect(left, top, left + bannerW, top + bannerH, 12, 12, hudPaint);
+        hudPaint.setColor(ContextCompat.getColor(context, R.color.festive_gold));
+        hudPaint.setStyle(Paint.Style.STROKE);
+        hudPaint.setStrokeWidth(2f);
+        canvas.drawRoundRect(left, top, left + bannerW, top + bannerH, 12, 12, hudPaint);
+        canvas.drawText(banner, (dWidth - textWidth) / 2f, top + 8f - fm.ascent, textPaint);
+        textPaint.setTextSize(savedSize);
+        textPaint.setColor(savedColor);
     }
 
     private void drawLevelCard(Canvas canvas) {
@@ -378,6 +451,7 @@ public class GameView extends View {
 
     private void gameOver() {
         if (gameOverRunnable != null) return;
+        bombRainActive = false;
         handler.removeCallbacks(runnableNewPresents);
         handler.removeCallbacks(runnableFallingPresents);
         if (getScore() > highScore) {
@@ -438,6 +512,7 @@ public class GameView extends View {
             if (gameOverRunnable != null) scheduleGameOver();
             else if (!levelComplete) {
                 handler.postDelayed(runnableFallingPresents, moveObjectPeriod);
+                armBombRain();
                 scheduleSpawn();
             }
         } else {
@@ -445,6 +520,10 @@ public class GameView extends View {
             handler.removeCallbacks(runnableFallingPresents);
             if (gameOverRunnable == null)
                 spawnRemaining = Math.max(0, spawnDeadline - pausedAtMs);
+            if (bombRainDeadline != 0) {
+                bombRainRemaining = Math.max(0, bombRainDeadline - pausedAtMs);
+                bombRainDeadline = 0;
+            }
             handler.removeCallbacks(runnableNewPresents);
             if (gameOverRunnable != null) {
                 gameOverRemaining = Math.max(0, gameOverDeadline - SystemClock.uptimeMillis());
@@ -816,8 +895,13 @@ public class GameView extends View {
     }
 
     private void addNewFallingObject() {
-        if (levelComplete || stock <= pendingPresents()) return;
+        if (levelComplete) return;
         if (fallingObjects.size() + pendingThrows.size() >= 8) return;
+        if (bombRainActive && stock > 0) {
+            pendingThrows.addLast(new PendingThrow(FallingObjectType.BOMB, bombImg, LevelTable.speedMultiplier(level)));
+            return;
+        }
+        if (stock <= pendingPresents()) return;
         FallingObjectType type;
         Bitmap image;
         if (random.nextInt(100) < LevelTable.bombChancePercent(level)) {
@@ -945,6 +1029,7 @@ public class GameView extends View {
             gameOver();
             return;
         }
+        LevelProgress.recordPass(sharedPreferences, level, missedPresents);
         if (level >= LevelTable.LEVEL_COUNT) {
             runWon = true;
             gameOver();
@@ -955,6 +1040,7 @@ public class GameView extends View {
 
     private void enterLevelComplete() {
         if (levelComplete) return;
+        bombRainActive = false;
         levelComplete = true;
         pauseGameplayHandlers();
         postInvalidate();
@@ -980,7 +1066,9 @@ public class GameView extends View {
         elfTargetX = homeX();
         treeStep = -1;
         sleighStep = -1;
+        resetBombRain();
         spawnRemaining = LevelTable.spawnPeriodMs(level);
+        armBombRain();
         resumeGameplay();
         postInvalidate();
     }
