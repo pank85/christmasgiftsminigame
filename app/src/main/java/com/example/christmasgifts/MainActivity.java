@@ -9,10 +9,12 @@ import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.view.Window;
 import android.view.WindowManager;
-import android.widget.Button;
+import android.widget.ImageButton;
 import android.widget.TextView;
 
 public class MainActivity extends AppCompatActivity {
+    private GameView gameView;
+    private boolean resumed;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -32,6 +34,17 @@ public class MainActivity extends AppCompatActivity {
         addListeners();
     }
 
+    @Override protected void onResume() {
+        super.onResume(); resumed = true;
+        if (gameView != null) gameView.setActivityResumed(true);
+    }
+
+    @Override protected void onPause() {
+        resumed = false;
+        if (gameView != null) gameView.setActivityResumed(false);
+        super.onPause();
+    }
+
     private void hideSystemBars() {
         WindowInsetsControllerCompat controller =
                 WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
@@ -47,14 +60,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void addListeners() {
-        Button startButton = findViewById(R.id.btn_start);
+        ImageButton startButton = findViewById(R.id.btn_start);
         startButton.setOnClickListener(view -> startGame());
     }
 
 
     public void startGame() {
-        GameView gameView=new GameView(this);
+        gameView = new GameView(this);
         setContentView(gameView);
+        gameView.setActivityResumed(resumed);
     }
 
 
