@@ -83,6 +83,21 @@ public class GameView extends View {
         }
     }
     private final List<Bitmap> presentImages = new ArrayList<>();
+    private final List<Bitmap> brokenPresentImages = new ArrayList<>();
+    private final List<BrokenPresent> brokenPresents = new ArrayList<>();
+
+    private static class BrokenPresent {
+        final int variant;
+        final float xFraction;
+        float x;
+        float y;
+        BrokenPresent(int variant, float xFraction, float x, float y) {
+            this.variant = variant;
+            this.xFraction = xFraction;
+            this.x = x;
+            this.y = y;
+        }
+    }
     private final int moveObjectPeriod = 10;
     private int level = 1, levelCaught, stock = -1;
     private boolean runWon;
@@ -196,6 +211,11 @@ public class GameView extends View {
         Rect sleighRect = sleighRect();
         if (sleighFrame != null) drawCenterCrop(canvas, sleighFrame, sleighRect);
         drawElf(canvas);
+        for (BrokenPresent broken : brokenPresents) {
+            if (broken.variant >= 0 && broken.variant < brokenPresentImages.size()) {
+                canvas.drawBitmap(brokenPresentImages.get(broken.variant), broken.x, broken.y, null);
+            }
+        }
         long now = running || pausedAtMs == 0 ? SystemClock.uptimeMillis() : pausedAtMs;
         if (explosion != null) {
             float progress = Math.min(1f, (now - explosionStartMs) / 2000f);
@@ -449,6 +469,7 @@ public class GameView extends View {
         float oldElfFraction = oldw > 0 ? elfX / oldw : 0.5f;
         List<Bitmap> oldPresentImages = new ArrayList<>(presentImages);
         presentImages.clear();
+        brokenPresentImages.clear();
         sleighFrame = null;
         treeFrame = null;
         sleighStep = -1;
@@ -486,6 +507,13 @@ public class GameView extends View {
             resizedPending.addLast(new PendingThrow(pending.type, image, pending.speedMultiplier));
         }
         pendingThrows.clear(); pendingThrows.addAll(resizedPending);
+        for (BrokenPresent broken : brokenPresents) {
+            if (!brokenPresentImages.isEmpty()) {
+                Bitmap img = brokenPresentImages.get(Math.max(0, Math.min(brokenPresentImages.size() - 1, broken.variant)));
+                broken.x = Math.max(0, Math.min(w - img.getWidth(), broken.xFraction * w));
+                broken.y = brokenPresentGroundY(img);
+            }
+        }
         if (explosion != null) explosion = explosionBitmap;
         updateRunning(); invalidate();
     }
@@ -545,6 +573,10 @@ public class GameView extends View {
         presentImages.add(bitmapFromDrawable(R.drawable.gift_red, objectSide, objectSide));
         presentImages.add(bitmapFromDrawable(R.drawable.gift_gold, objectSide, objectSide));
         presentImages.add(bitmapFromDrawable(R.drawable.gift_green, objectSide, objectSide));
+        brokenPresentImages.clear();
+        brokenPresentImages.add(bitmapFromDrawable(R.drawable.broken_gift_red, objectSide, objectSide));
+        brokenPresentImages.add(bitmapFromDrawable(R.drawable.broken_gift_gold, objectSide, objectSide));
+        brokenPresentImages.add(bitmapFromDrawable(R.drawable.broken_gift_green, objectSide, objectSide));
         snowflakeImg = bitmapFromDrawable(R.drawable.snowflake, objectSide, objectSide);
         bombImg = bitmapFromDrawable(R.drawable.bomb_ornament, objectSide, objectSide);
         int elfSide = Math.max(1, Math.min(dWidth / 5, dHeight / 9));
@@ -835,6 +867,10 @@ public class GameView extends View {
         return true;
     }
 
+    private float brokenPresentGroundY(Bitmap img) {
+        return dHeight - img.getHeight() - Math.max(4f, dHeight / 40f);
+    }
+
     private void checkIfLeftTheScreen() {
         float passY = santaY + santa.getHeight();
         Iterator<FallingObject> iterator = fallingObjects.iterator();
@@ -846,6 +882,14 @@ public class GameView extends View {
                     combo = 0;
                     int cap = LevelTable.quota(level) - levelCaught;
                     if (stock < cap) stock++;
+                    int variant = Math.max(0, presentImages.indexOf(item.getImage()));
+                    if (!brokenPresentImages.isEmpty()) {
+                        Bitmap brokenImg = brokenPresentImages.get(Math.min(variant, brokenPresentImages.size() - 1));
+                        float bx = Math.max(0, Math.min(dWidth - brokenImg.getWidth(), item.getPosition_x()));
+                        float by = brokenPresentGroundY(brokenImg);
+                        float xFraction = dWidth > 0 ? bx / dWidth : 0f;
+                        brokenPresents.add(new BrokenPresent(variant, xFraction, bx, by));
+                    }
                 }
                 iterator.remove();
             }
