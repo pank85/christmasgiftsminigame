@@ -8,6 +8,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -67,7 +68,8 @@ public class GameView extends View {
     private final float[] speckX = new float[12], speckY = new float[12], speckSpeed = new float[12];
     private final float[] burstX = new float[8], burstY = new float[8];
     private int burstCount;
-    private long burstStartMs, explosionStartMs, pausedAtMs;
+    private long burstStartMs, explosionStartMs, pausedAtMs, levelCompleteStartMs;
+    private final Path starPath = new Path();
     private final Random random = new Random();
     private final List<FallingObject> fallingObjects = new ArrayList<>();
     // Mirrors the bomb's 40 movement ticks, including the last protected collision check.
@@ -344,31 +346,99 @@ public class GameView extends View {
     }
 
     private void drawLevelCard(Canvas canvas) {
-        float pad = Math.max(12f, dWidth / 18f);
+        long elapsed = Math.max(0, SystemClock.uptimeMillis() - levelCompleteStartMs);
+        float enterT = Math.min(1f, elapsed / 280f);
+        float easeEnter = 1f - (1f - enterT) * (1f - enterT);
+        float slideY = (1f - easeEnter) * Math.max(18f, dHeight / 30f);
+
+        float pad = Math.max(14f, dWidth / 18f);
         float cardLeft = pad;
         float cardRight = dWidth - pad;
-        float cardTop = hudBottom + pad;
-        float cardBottom = Math.min(dHeight - pad, cardTop + dHeight * 0.55f);
+        float cardTop = hudBottom + pad + slideY;
+        float cardBottom = Math.min(dHeight - pad, cardTop + dHeight * 0.56f);
+
+        int cardAlpha = (int) (235 * easeEnter);
         cardPaint.setStyle(Paint.Style.FILL);
         cardPaint.setColor(ContextCompat.getColor(context, R.color.festive_night));
-        cardPaint.setAlpha(230);
-        canvas.drawRoundRect(cardLeft, cardTop, cardRight, cardBottom, 16, 16, cardPaint);
+        cardPaint.setAlpha(cardAlpha);
+        canvas.drawRoundRect(cardLeft, cardTop, cardRight, cardBottom, 20, 20, cardPaint);
         cardPaint.setStyle(Paint.Style.STROKE);
         cardPaint.setStrokeWidth(3f);
         cardPaint.setColor(ContextCompat.getColor(context, R.color.festive_gold));
-        canvas.drawRoundRect(cardLeft, cardTop, cardRight, cardBottom, 16, 16, cardPaint);
-        textPaint.setColor(ContextCompat.getColor(context, R.color.festive_cream));
-        float textSize = Math.max(14f, Math.min(textPaint.getTextSize(), (cardBottom - cardTop) / 8f));
-        textPaint.setTextSize(textSize);
+        cardPaint.setAlpha((int) (255 * easeEnter));
+        canvas.drawRoundRect(cardLeft, cardTop, cardRight, cardBottom, 20, 20, cardPaint);
+
+        float savedSize = textPaint.getTextSize();
+        int savedColor = textPaint.getColor();
+        Paint.Align savedAlign = textPaint.getTextAlign();
+        int savedTextAlpha = textPaint.getAlpha();
+
+        textPaint.setAlpha((int) (255 * easeEnter));
+        float titleSize = Math.max(18f, Math.min(savedSize * 1.15f, (cardBottom - cardTop) / 7.5f));
+        textPaint.setTextSize(titleSize);
+        textPaint.setColor(ContextCompat.getColor(context, R.color.festive_gold));
+        textPaint.setTextAlign(Paint.Align.CENTER);
+        Paint.FontMetrics titleFm = textPaint.getFontMetrics();
+        float y = cardTop + pad - titleFm.ascent;
+        canvas.drawText("Level " + level + " Complete!", (cardLeft + cardRight) / 2f, y, textPaint);
+
+        // Animated 3-star row
+        float starRadius = Math.max(16f, Math.min((cardRight - cardLeft) / 11f, (cardBottom - cardTop) / 9f));
+        float starY = y + titleFm.descent + pad * 0.7f + starRadius;
+        float starSpacing = starRadius * 2.7f;
+        float starCenterX = (cardLeft + cardRight) / 2f;
+        int earnedStars = LevelProgress.starsForMisses(missedPresents);
+        int goldColor = ContextCompat.getColor(context, R.color.festive_gold);
+        int creamColor = ContextCompat.getColor(context, R.color.festive_cream);
+
+        for (int i = 0; i < LevelProgress.MAX_STARS; i++) {
+            float cx = starCenterX + (i - 1) * starSpacing;
+            // Dim empty star slot
+            drawStar(canvas, cx, starY, starRadius, goldColor, 55, false);
+            if (i < earnedStars) {
+                long starDelay = 220L + i * 230L;
+                if (elapsed > starDelay) {
+                    float st = Math.min(1f, (elapsed - starDelay) / 280f);
+                    // Overshoot bounce: 0 -> 1.32 -> 1.0
+                    float scale = st < 0.65f
+                            ? (st / 0.65f) * 1.32f
+                            : 1.32f - 0.32f * ((st - 0.65f) / 0.35f);
+                    drawStar(canvas, cx, starY, starRadius * scale, goldColor, 255, true);
+                    if (st < 1f) {
+                        speckPaint.setColor(goldColor);
+                        speckPaint.setAlpha((int) (220 * (1f - st)));
+                        for (int p = 0; p < 6; p++) {
+                            double ang = 2 * Math.PI * p / 6.0;
+                            float dist = starRadius * (0.9f + 0.8f * st);
+                            canvas.drawCircle(cx + (float) Math.cos(ang) * dist,
+                                    starY + (float) Math.sin(ang) * dist, 4f, speckPaint);
+                        }
+                        speckPaint.setColor(creamColor);
+                        speckPaint.setAlpha(255);
+                    }
+                }
+            }
+        }
+
+        // Animated count-up for gifts collected, combos won, and score
+        float rawStats = Math.max(0f, Math.min(1f, (elapsed - 280f) / 820f));
+        float statsT = 1f - (1f - rawStats) * (1f - rawStats);
+        int animCaught = Math.round(levelCaught * statsT);
+        int animCombo = Math.round(comboPeak * statsT);
+        int animScore = Math.round(score * statsT);
+
+        float rowSize = Math.max(14f, Math.min(savedSize * 0.95f, (cardBottom - cardTop) / 9f));
+        textPaint.setTextSize(rowSize);
+        textPaint.setColor(creamColor);
+        textPaint.setTextAlign(Paint.Align.LEFT);
         Paint.FontMetrics fm = textPaint.getFontMetrics();
-        float line = textSize + Math.max(4f, -fm.ascent * 0.15f);
-        float y = cardTop + pad - fm.ascent;
+        float line = rowSize + Math.max(6f, -fm.ascent * 0.2f);
+        y = starY + starRadius + pad * 0.8f - fm.ascent;
         int quota = LevelTable.quota(level);
         String[] rows = {
-                "Score: " + score,
-                "Caught: " + levelCaught + "/" + quota,
-                "Missed: " + missedPresents + "/3",
-                "Combo: " + comboPeak
+                "Gifts Collected: " + animCaught + "/" + quota,
+                "Best Combo: " + animCombo + "x",
+                "Score: " + animScore
         };
         float inner = cardRight - cardLeft - 2 * pad;
         for (String row : rows) {
@@ -376,18 +446,52 @@ public class GameView extends View {
                     cardLeft + pad, y, textPaint);
             y += line;
         }
-        float buttonTop = Math.min(cardBottom - pad - line * 1.4f, y + line * 0.3f);
+
+        float buttonTop = Math.min(cardBottom - pad - line * 1.4f, y + line * 0.35f);
         float buttonBottom = Math.min(cardBottom - pad, buttonTop + line * 1.5f);
         nextLevelButton.set(cardLeft + pad, buttonTop, cardRight - pad, buttonBottom);
         cardPaint.setStyle(Paint.Style.FILL);
-        cardPaint.setColor(ContextCompat.getColor(context, R.color.festive_gold));
+        cardPaint.setColor(goldColor);
+        cardPaint.setAlpha((int) (255 * easeEnter));
         canvas.drawRoundRect(nextLevelButton, 12, 12, cardPaint);
         textPaint.setColor(ContextCompat.getColor(context, R.color.festive_night));
         String label = "Next Level";
         float labelW = textPaint.measureText(label);
         canvas.drawText(label, nextLevelButton.centerX() - labelW / 2f,
                 nextLevelButton.centerY() - (fm.ascent + fm.descent) / 2f, textPaint);
-        textPaint.setColor(ContextCompat.getColor(context, R.color.festive_cream));
+
+        textPaint.setTextSize(savedSize);
+        textPaint.setColor(savedColor);
+        textPaint.setTextAlign(savedAlign);
+        textPaint.setAlpha(savedTextAlpha);
+        cardPaint.setAlpha(255);
+
+        if (elapsed < 1350L) {
+            postInvalidateOnAnimation();
+        }
+    }
+
+    private void drawStar(Canvas canvas, float cx, float cy, float outerR, int color, int alpha, boolean filled) {
+        starPath.reset();
+        float innerR = outerR * 0.44f;
+        for (int i = 0; i < 10; i++) {
+            double angle = -Math.PI / 2.0 + i * Math.PI / 5.0;
+            float r = (i % 2 == 0) ? outerR : innerR;
+            float px = cx + (float) Math.cos(angle) * r;
+            float py = cy + (float) Math.sin(angle) * r;
+            if (i == 0) starPath.moveTo(px, py);
+            else starPath.lineTo(px, py);
+        }
+        starPath.close();
+        cardPaint.setColor(color);
+        cardPaint.setAlpha(alpha);
+        if (filled) {
+            cardPaint.setStyle(Paint.Style.FILL);
+        } else {
+            cardPaint.setStyle(Paint.Style.STROKE);
+            cardPaint.setStrokeWidth(2.5f);
+        }
+        canvas.drawPath(starPath, cardPaint);
     }
 
     private void fitHud() {
@@ -652,7 +756,7 @@ public class GameView extends View {
     }
 
     private void InitBitmaps() {
-        rectBackground = new Rect(0, gameViewTop, dWidth, groundTop());
+        rectBackground = new Rect(0, gameViewTop, dWidth, dHeight);
         rectGround = new Rect(0, groundTop(), dWidth, dHeight);
         background = intrinsicBitmap(R.drawable.bg_play);
         ground = intrinsicBitmap(R.drawable.ground_snow);
@@ -1042,6 +1146,7 @@ public class GameView extends View {
         if (levelComplete) return;
         bombRainActive = false;
         levelComplete = true;
+        levelCompleteStartMs = SystemClock.uptimeMillis();
         pauseGameplayHandlers();
         postInvalidate();
     }
