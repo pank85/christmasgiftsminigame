@@ -5,11 +5,15 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
+import android.view.LayoutInflater;
+import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
-import android.widget.ImageButton;
+import android.widget.GridLayout;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 public class MainActivity extends AppCompatActivity {
@@ -27,11 +31,57 @@ public class MainActivity extends AppCompatActivity {
         if (getSupportActionBar()!=null)
             getSupportActionBar().hide();
         setContentView(R.layout.activity_main);
-        int highScore = PreferenceManager.getDefaultSharedPreferences(this)
-                .getInt(getString(R.string.high_score), 0);
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        int highScore = prefs.getInt(getString(R.string.high_score), 0);
         TextView menuHighScore = findViewById(R.id.menu_high_score);
         menuHighScore.setText(getString(R.string.menu_high_score_fmt, highScore));
-        addListeners();
+        bindLevelGrid(prefs);
+    }
+
+    private void bindLevelGrid(SharedPreferences prefs) {
+        GridLayout grid = findViewById(R.id.level_grid);
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (int level = 1; level <= LevelTable.LEVEL_COUNT; level++) {
+            View tile = inflater.inflate(R.layout.level_tile, grid, false);
+            TextView number = tile.findViewById(R.id.level_number);
+            View starsRow = tile.findViewById(R.id.level_stars);
+            ImageView lock = tile.findViewById(R.id.level_lock);
+            ImageView[] stars = new ImageView[] {
+                    tile.findViewById(R.id.star_1),
+                    tile.findViewById(R.id.star_2),
+                    tile.findViewById(R.id.star_3)
+            };
+            number.setText(String.valueOf(level));
+            boolean unlocked = LevelProgress.isUnlocked(prefs, level);
+            int earned = LevelProgress.stars(prefs, level);
+            if (unlocked && earned > 0) {
+                starsRow.setVisibility(View.VISIBLE);
+                for (int i = 0; i < stars.length; i++) {
+                    stars[i].setVisibility(i < earned ? View.VISIBLE : View.INVISIBLE);
+                }
+            } else {
+                starsRow.setVisibility(View.INVISIBLE);
+            }
+            if (unlocked) {
+                tile.setAlpha(1f);
+                lock.setVisibility(View.GONE);
+                tile.setEnabled(true);
+                tile.setClickable(true);
+                final int selected = level;
+                tile.setOnClickListener(view -> startGame(selected));
+                tile.setContentDescription(earned > 0
+                        ? getString(R.string.level_stars_desc, level, earned)
+                        : getString(R.string.level_open_desc, level));
+            } else {
+                tile.setAlpha(0.45f);
+                lock.setVisibility(View.VISIBLE);
+                tile.setEnabled(false);
+                tile.setClickable(false);
+                tile.setOnClickListener(null);
+                tile.setContentDescription(getString(R.string.level_locked_desc, level));
+            }
+            grid.addView(tile);
+        }
     }
 
     @Override protected void onResume() {
@@ -59,17 +109,9 @@ public class MainActivity extends AppCompatActivity {
         if (hasFocus) hideSystemBars();
     }
 
-    private void addListeners() {
-        ImageButton startButton = findViewById(R.id.btn_start);
-        startButton.setOnClickListener(view -> startGame());
-    }
-
-
-    public void startGame() {
-        gameView = new GameView(this);
+    public void startGame(int level) {
+        gameView = new GameView(this, level);
         setContentView(gameView);
         gameView.setActivityResumed(resumed);
     }
-
-
 }

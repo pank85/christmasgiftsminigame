@@ -7,10 +7,14 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Shader;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Handler;
@@ -39,8 +43,8 @@ public class GameView extends View {
     private final Context context;
     static int dWidth, dHeight, gameViewTop;
     private Bitmap ground, background, bombImg, snowflakeImg, explosionBitmap, explosion, santa;
-    private float santaX, santaY;
-    private boolean santaPlaced;
+    private float santaX, santaY, lastTouchX;
+    private boolean santaPlaced, draggingSanta, nextButtonPressed;
     private Bitmap elf;
     private float elfX, elfY, elfTargetX;
     private boolean elfPlaced, dropChosen;
@@ -52,6 +56,8 @@ public class GameView extends View {
     private boolean levelComplete;
     private long gameOverRemaining = 2000, gameOverDeadline;
     private long spawnRemaining, spawnDeadline;
+    private boolean bombRainActive;
+    private long bombRainRemaining, bombRainDeadline;
     private float hudFirstBaseline, hudSecondBaseline, hudBottom;
     private Rect rectBackground, rectGround;
     private final RectF nextLevelButton = new RectF();
@@ -65,7 +71,8 @@ public class GameView extends View {
     private final float[] speckX = new float[12], speckY = new float[12], speckSpeed = new float[12];
     private final float[] burstX = new float[8], burstY = new float[8];
     private int burstCount;
-    private long burstStartMs, explosionStartMs, pausedAtMs;
+    private long burstStartMs, explosionStartMs, pausedAtMs, levelCompleteStartMs;
+    private final Path starPath = new Path();
     private final Random random = new Random();
     private final List<FallingObject> fallingObjects = new ArrayList<>();
     // Mirrors the bomb's 40 movement ticks, including the last protected collision check.
@@ -101,25 +108,69 @@ public class GameView extends View {
     private final int moveObjectPeriod = 10;
     private int level = 1, levelCaught, stock = -1;
     private boolean runWon;
-    private int score, combo, comboPeak, bonusLives, missedPresents, highScore;
+    private int score, combo, comboPeak, missedPresents, highScore;
     private long lastPresentCatchMs;
     private SharedPreferences sharedPreferences;
     private Bitmap sleighFrame, treeFrame;
     private int sleighStep = -1, treeStep = -1, frameWidth, frameHeight;
 
     public GameView(Context context) {
+        this(context, 1);
+    }
+
+    public GameView(Context context, int startLevel) {
         super(context);
         this.context = context;
+        this.level = startLevel >= 1 && startLevel <= LevelTable.LEVEL_COUNT ? startLevel : 1;
         InitScreenSize();
         InitRest();
         InitBitmaps();
         Start();
+        resetBombRain();
+    }
+
+    private void resetBombRain() {
+        bombRainActive = false;
+        bombRainDeadline = 0;
+        bombRainRemaining = LevelTable.hasBombRain(level) ? LevelTable.bombRainIntervalMs(level) : 0;
+    }
+
+    private void armBombRain() {
+        if (!LevelTable.hasBombRain(level)) {
+            bombRainActive = false;
+            bombRainDeadline = 0;
+            bombRainRemaining = 0;
+            return;
+        }
+        if (bombRainDeadline != 0) return;
+        bombRainDeadline = SystemClock.uptimeMillis() + Math.max(0, bombRainRemaining);
+    }
+
+    private void tickBombRain(long now) {
+        if (!LevelTable.hasBombRain(level) || stock <= 0) {
+            bombRainActive = false;
+            return;
+        }
+        if (bombRainDeadline == 0 || now < bombRainDeadline) return;
+        if (!bombRainActive) {
+            bombRainActive = true;
+            bombRainRemaining = LevelTable.bombRainDurationMs(level);
+        } else {
+            bombRainActive = false;
+            bombRainRemaining = LevelTable.bombRainIntervalMs(level);
+        }
+        bombRainDeadline = now + bombRainRemaining;
+    }
+
+    private long currentSpawnPeriodMs() {
+        if (bombRainActive && LevelTable.hasBombRain(level)) return LevelTable.bombRainSpawnPeriodMs(level);
+        return LevelTable.spawnPeriodMs(level);
     }
 
     private void InitRest() {
         textPaint.setColor(ContextCompat.getColor(context, R.color.festive_cream));
         textPaint.setTextSize(Math.max(1, Math.min(50, gameViewTop / 4f)));
-        textPaint.setTypeface(ResourcesCompat.getFont(context, R.font.winter_snow_regular));
+        textPaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         textPaint.setStyle(Paint.Style.FILL);
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
         highScore = sharedPreferences.getInt(context.getString(R.string.high_score), 0);
@@ -149,6 +200,7 @@ public class GameView extends View {
         };
         runnableNewPresents = () -> {
             if (!running || levelComplete) return;
+            tickBombRain(SystemClock.uptimeMillis());
             addNewFallingObject();
             postInvalidate();
             if (levelComplete) {
@@ -156,7 +208,7 @@ public class GameView extends View {
                 return;
             }
             if (!checkGameOver()) {
-                spawnRemaining = LevelTable.spawnPeriodMs(level);
+                spawnRemaining = currentSpawnPeriodMs();
                 scheduleSpawn();
             }
         };
@@ -172,16 +224,42 @@ public class GameView extends View {
         float touchX = event.getX();
         float touchY = event.getY();
         if (levelComplete) {
-            if (event.getAction() == MotionEvent.ACTION_UP && nextLevelButton.contains(touchX, touchY)) {
-                advanceFromLevelCard();
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE) {
+                boolean inside = nextLevelButton.contains(touchX, touchY);
+                if (inside != nextButtonPressed) {
+                    nextButtonPressed = inside;
+                    postInvalidate();
+                }
+            } else if (action == MotionEvent.ACTION_UP) {
+                boolean shouldAdvance = nextButtonPressed && nextLevelButton.contains(touchX, touchY);
+                nextButtonPressed = false;
+                postInvalidate();
+                if (shouldAdvance) advanceFromLevelCard();
+            } else if (action == MotionEvent.ACTION_CANCEL) {
+                nextButtonPressed = false;
+                postInvalidate();
             }
             return true;
         }
         if (santa == null || gameOverRunnable != null) return true;
-        if (event.getAction() == MotionEvent.ACTION_DOWN || event.getAction() == MotionEvent.ACTION_MOVE) {
-            santaX = touchX - santa.getWidth() / 2f;
-            clampSanta();
-            postInvalidate();
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                lastTouchX = touchX;
+                draggingSanta = true;
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (draggingSanta) {
+                    santaX += touchX - lastTouchX;
+                    lastTouchX = touchX;
+                    clampSanta();
+                    postInvalidate();
+                }
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                draggingSanta = false;
+                break;
         }
         return true;
     }
@@ -249,7 +327,7 @@ public class GameView extends View {
         }
         canvas.restore();
         String[] labels = {"Level " + level, "Caught: " + levelCaught + "/" + LevelTable.quota(level),
-                "Lives: " + getRemainingLives(), "Score: " + score};
+                "Missed: " + missedPresents + "/3", "Score: " + score};
         float padding = Math.max(4f, dWidth / 20f);
         float gap = padding;
         float columnWidth = Math.max(0, (dWidth - 2 * padding - gap) / 2f);
@@ -267,35 +345,129 @@ public class GameView extends View {
         canvas.drawText(TextUtils.ellipsize(labels[1], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), rightX, hudFirstBaseline, textPaint);
         canvas.drawText(TextUtils.ellipsize(labels[2], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), padding, hudSecondBaseline, textPaint);
         canvas.drawText(TextUtils.ellipsize(labels[3], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), rightX, hudSecondBaseline, textPaint);
+        if (bombRainActive) drawBombRainBanner(canvas);
         if (levelComplete) drawLevelCard(canvas);
     }
 
+    private void drawBombRainBanner(Canvas canvas) {
+        float savedSize = textPaint.getTextSize();
+        int savedColor = textPaint.getColor();
+        String banner = "BOMB RAIN!";
+        textPaint.setTextSize(Math.max(18f, Math.min(42f, dWidth / 12f)));
+        textPaint.setColor(ContextCompat.getColor(context, R.color.festive_cream));
+        float textWidth = textPaint.measureText(banner);
+        Paint.FontMetrics fm = textPaint.getFontMetrics();
+        float bannerH = fm.descent - fm.ascent + 16f;
+        float bannerW = textWidth + 32f;
+        float left = (dWidth - bannerW) / 2f;
+        float top = hudBottom + 6f;
+        hudPaint.setStyle(Paint.Style.FILL);
+        hudPaint.setColor(ContextCompat.getColor(context, R.color.festive_red));
+        hudPaint.setAlpha(255);
+        canvas.drawRoundRect(left, top, left + bannerW, top + bannerH, 12, 12, hudPaint);
+        hudPaint.setColor(ContextCompat.getColor(context, R.color.festive_gold));
+        hudPaint.setStyle(Paint.Style.STROKE);
+        hudPaint.setStrokeWidth(2f);
+        canvas.drawRoundRect(left, top, left + bannerW, top + bannerH, 12, 12, hudPaint);
+        canvas.drawText(banner, (dWidth - textWidth) / 2f, top + 8f - fm.ascent, textPaint);
+        textPaint.setTextSize(savedSize);
+        textPaint.setColor(savedColor);
+    }
+
     private void drawLevelCard(Canvas canvas) {
-        float pad = Math.max(12f, dWidth / 18f);
+        long elapsed = Math.max(0, SystemClock.uptimeMillis() - levelCompleteStartMs);
+        float enterT = Math.min(1f, elapsed / 280f);
+        float easeEnter = 1f - (1f - enterT) * (1f - enterT);
+        float slideY = (1f - easeEnter) * Math.max(18f, dHeight / 30f);
+
+        float pad = Math.max(16f, dWidth / 16f);
         float cardLeft = pad;
         float cardRight = dWidth - pad;
-        float cardTop = hudBottom + pad;
-        float cardBottom = Math.min(dHeight - pad, cardTop + dHeight * 0.55f);
+        float cardTop = hudBottom + pad + slideY;
+        float cardBottom = Math.min(dHeight - pad, cardTop + dHeight * 0.62f);
+
+        int cardAlpha = (int) (235 * easeEnter);
         cardPaint.setStyle(Paint.Style.FILL);
         cardPaint.setColor(ContextCompat.getColor(context, R.color.festive_night));
-        cardPaint.setAlpha(230);
-        canvas.drawRoundRect(cardLeft, cardTop, cardRight, cardBottom, 16, 16, cardPaint);
+        cardPaint.setAlpha(cardAlpha);
+        canvas.drawRoundRect(cardLeft, cardTop, cardRight, cardBottom, 20, 20, cardPaint);
         cardPaint.setStyle(Paint.Style.STROKE);
         cardPaint.setStrokeWidth(3f);
         cardPaint.setColor(ContextCompat.getColor(context, R.color.festive_gold));
-        canvas.drawRoundRect(cardLeft, cardTop, cardRight, cardBottom, 16, 16, cardPaint);
-        textPaint.setColor(ContextCompat.getColor(context, R.color.festive_cream));
-        float textSize = Math.max(14f, Math.min(textPaint.getTextSize(), (cardBottom - cardTop) / 8f));
-        textPaint.setTextSize(textSize);
+        cardPaint.setAlpha((int) (255 * easeEnter));
+        canvas.drawRoundRect(cardLeft, cardTop, cardRight, cardBottom, 20, 20, cardPaint);
+
+        float savedSize = textPaint.getTextSize();
+        int savedColor = textPaint.getColor();
+        Paint.Align savedAlign = textPaint.getTextAlign();
+        int savedTextAlpha = textPaint.getAlpha();
+
+        textPaint.setAlpha((int) (255 * easeEnter));
+        float titleSize = Math.max(18f, Math.min(savedSize * 1.15f, (cardBottom - cardTop) / 7.5f));
+        textPaint.setTextSize(titleSize);
+        textPaint.setColor(ContextCompat.getColor(context, R.color.festive_gold));
+        textPaint.setTextAlign(Paint.Align.CENTER);
+        Paint.FontMetrics titleFm = textPaint.getFontMetrics();
+        float y = cardTop + pad - titleFm.ascent;
+        canvas.drawText("Level " + level + " Complete!", (cardLeft + cardRight) / 2f, y, textPaint);
+
+        // Animated 3-star row
+        float starRadius = Math.max(16f, Math.min((cardRight - cardLeft) / 11f, (cardBottom - cardTop) / 9f));
+        float starY = y + titleFm.descent + pad * 0.7f + starRadius;
+        float starSpacing = starRadius * 2.7f;
+        float starCenterX = (cardLeft + cardRight) / 2f;
+        int earnedStars = LevelProgress.starsForMisses(missedPresents);
+        int goldColor = ContextCompat.getColor(context, R.color.festive_gold);
+        int creamColor = ContextCompat.getColor(context, R.color.festive_cream);
+
+        for (int i = 0; i < LevelProgress.MAX_STARS; i++) {
+            float cx = starCenterX + (i - 1) * starSpacing;
+            // Dim empty star slot
+            drawStar(canvas, cx, starY, starRadius, goldColor, 55, false);
+            if (i < earnedStars) {
+                long starDelay = 220L + i * 230L;
+                if (elapsed > starDelay) {
+                    float st = Math.min(1f, (elapsed - starDelay) / 280f);
+                    // Overshoot bounce: 0 -> 1.32 -> 1.0
+                    float scale = st < 0.65f
+                            ? (st / 0.65f) * 1.32f
+                            : 1.32f - 0.32f * ((st - 0.65f) / 0.35f);
+                    drawStar(canvas, cx, starY, starRadius * scale, goldColor, 255, true);
+                    if (st < 1f) {
+                        speckPaint.setColor(goldColor);
+                        speckPaint.setAlpha((int) (220 * (1f - st)));
+                        for (int p = 0; p < 6; p++) {
+                            double ang = 2 * Math.PI * p / 6.0;
+                            float dist = starRadius * (0.9f + 0.8f * st);
+                            canvas.drawCircle(cx + (float) Math.cos(ang) * dist,
+                                    starY + (float) Math.sin(ang) * dist, 4f, speckPaint);
+                        }
+                        speckPaint.setColor(creamColor);
+                        speckPaint.setAlpha(255);
+                    }
+                }
+            }
+        }
+
+        // Animated count-up for gifts collected, combos won, and score
+        float rawStats = Math.max(0f, Math.min(1f, (elapsed - 280f) / 820f));
+        float statsT = 1f - (1f - rawStats) * (1f - rawStats);
+        int animCaught = Math.round(levelCaught * statsT);
+        int animCombo = Math.round(comboPeak * statsT);
+        int animScore = Math.round(score * statsT);
+
+        float rowSize = Math.max(15f, Math.min(savedSize * 1.05f, (cardBottom - cardTop) / 11f));
+        textPaint.setTextSize(rowSize);
+        textPaint.setColor(creamColor);
+        textPaint.setTextAlign(Paint.Align.LEFT);
         Paint.FontMetrics fm = textPaint.getFontMetrics();
-        float line = textSize + Math.max(4f, -fm.ascent * 0.15f);
-        float y = cardTop + pad - fm.ascent;
+        float line = rowSize * 1.6f;
+        y = starY + starRadius + pad * 1.15f - fm.ascent;
         int quota = LevelTable.quota(level);
         String[] rows = {
-                "Score: " + score,
-                "Caught: " + levelCaught,
-                "Total: " + quota,
-                "Combo: " + comboPeak
+                "Gifts Collected: " + animCaught + "/" + quota,
+                "Best Combo: " + animCombo + "x",
+                "Score: " + animScore
         };
         float inner = cardRight - cardLeft - 2 * pad;
         for (String row : rows) {
@@ -303,25 +475,88 @@ public class GameView extends View {
                     cardLeft + pad, y, textPaint);
             y += line;
         }
-        float buttonTop = Math.min(cardBottom - pad - line * 1.4f, y + line * 0.3f);
-        float buttonBottom = Math.min(cardBottom - pad, buttonTop + line * 1.5f);
+
+        float btnHeight = Math.max(44f, line * 1.35f);
+        float buttonTop = Math.min(cardBottom - pad - btnHeight, y + line * 0.35f);
+        float buttonBottom = Math.min(cardBottom - pad, buttonTop + btnHeight);
         nextLevelButton.set(cardLeft + pad, buttonTop, cardRight - pad, buttonBottom);
+
+        // 3D extruded gold button
+        float bevel = Math.max(5f, btnHeight * 0.14f);
+        float pressOffset = nextButtonPressed ? bevel * 0.6f : 0f;
+        int btnAlpha = (int) (255 * easeEnter);
+
+        // Drop shadow
         cardPaint.setStyle(Paint.Style.FILL);
-        cardPaint.setColor(ContextCompat.getColor(context, R.color.festive_gold));
-        canvas.drawRoundRect(nextLevelButton, 12, 12, cardPaint);
+        cardPaint.setColor(Color.argb((int) (110 * easeEnter), 0, 0, 0));
+        canvas.drawRoundRect(nextLevelButton.left, nextLevelButton.top + bevel * 1.45f,
+                nextLevelButton.right, nextLevelButton.bottom + bevel * 1.45f, 16, 16, cardPaint);
+
+        // 3D bottom lip
+        cardPaint.setColor(Color.rgb(166, 114, 12));
+        cardPaint.setAlpha(btnAlpha);
+        canvas.drawRoundRect(nextLevelButton.left, nextLevelButton.top + bevel,
+                nextLevelButton.right, nextLevelButton.bottom + bevel, 14, 14, cardPaint);
+
+        // Gradient top face
+        RectF face = new RectF(nextLevelButton.left, nextLevelButton.top + pressOffset,
+                nextLevelButton.right, nextLevelButton.bottom + pressOffset);
+        cardPaint.setShader(new LinearGradient(0, face.top, 0, face.bottom,
+                Color.rgb(255, 234, 130), Color.rgb(245, 180, 32), Shader.TileMode.CLAMP));
+        canvas.drawRoundRect(face, 14, 14, cardPaint);
+        cardPaint.setShader(null);
+
+        // Specular rim highlight
+        cardPaint.setStyle(Paint.Style.STROKE);
+        cardPaint.setStrokeWidth(2.5f);
+        cardPaint.setColor(Color.argb((int) (170 * easeEnter), 255, 255, 255));
+        canvas.drawRoundRect(face.left + 1.5f, face.top + 1.5f, face.right - 1.5f, face.bottom - 1.5f, 13, 13, cardPaint);
+
         textPaint.setColor(ContextCompat.getColor(context, R.color.festive_night));
         String label = "Next Level";
         float labelW = textPaint.measureText(label);
-        canvas.drawText(label, nextLevelButton.centerX() - labelW / 2f,
-                nextLevelButton.centerY() - (fm.ascent + fm.descent) / 2f, textPaint);
-        textPaint.setColor(ContextCompat.getColor(context, R.color.festive_cream));
+        canvas.drawText(label, face.centerX() - labelW / 2f,
+                face.centerY() - (fm.ascent + fm.descent) / 2f, textPaint);
+
+        textPaint.setTextSize(savedSize);
+        textPaint.setColor(savedColor);
+        textPaint.setTextAlign(savedAlign);
+        textPaint.setAlpha(savedTextAlpha);
+        cardPaint.setAlpha(255);
+
+        if (elapsed < 1350L) {
+            postInvalidateOnAnimation();
+        }
+    }
+
+    private void drawStar(Canvas canvas, float cx, float cy, float outerR, int color, int alpha, boolean filled) {
+        starPath.reset();
+        float innerR = outerR * 0.44f;
+        for (int i = 0; i < 10; i++) {
+            double angle = -Math.PI / 2.0 + i * Math.PI / 5.0;
+            float r = (i % 2 == 0) ? outerR : innerR;
+            float px = cx + (float) Math.cos(angle) * r;
+            float py = cy + (float) Math.sin(angle) * r;
+            if (i == 0) starPath.moveTo(px, py);
+            else starPath.lineTo(px, py);
+        }
+        starPath.close();
+        cardPaint.setColor(color);
+        cardPaint.setAlpha(alpha);
+        if (filled) {
+            cardPaint.setStyle(Paint.Style.FILL);
+        } else {
+            cardPaint.setStyle(Paint.Style.STROKE);
+            cardPaint.setStrokeWidth(2.5f);
+        }
+        canvas.drawPath(starPath, cardPaint);
     }
 
     private void fitHud() {
-        String[] labels = {"Level 10", "Caught: 120/120", "Lives: 5", "Score: 999999"};
-        float padding = Math.max(4f, dWidth / 20f);
+        String[] labels = {"Level 10", "Caught: 120/120", "Missed: 3/3", "Score: 999999"};
+        float padding = Math.max(6f, dWidth / 20f);
         float columnWidth = Math.max(0, (dWidth - 3 * padding) / 2f);
-        float size = Math.max(1f, Math.min(50f, dHeight / 24f));
+        float size = Math.max(1f, Math.min(44f, dHeight / 30f));
         while (true) {
             textPaint.setTextSize(size);
             boolean fits = true;
@@ -330,9 +565,9 @@ public class GameView extends View {
             size = Math.max(1f, size - 1f);
         }
         Paint.FontMetrics fm = textPaint.getFontMetrics();
-        float margin = Math.max(3f, size * 0.15f);
+        float margin = Math.max(6f, size * 0.25f);
         hudFirstBaseline = margin - fm.ascent;
-        hudSecondBaseline = hudFirstBaseline + fm.descent - fm.ascent;
+        hudSecondBaseline = hudFirstBaseline + (fm.descent - fm.ascent) * 1.15f;
         hudBottom = Math.min(dHeight, hudSecondBaseline + fm.descent + margin);
         gameViewTop = Math.max(1, (int) Math.ceil(hudBottom));
     }
@@ -353,10 +588,19 @@ public class GameView extends View {
         clampSanta();
     }
 
+    private int groundHeight() {
+        return Math.max(1, dHeight / 6);
+    }
+
+    private int groundTop() {
+        return dHeight - groundHeight();
+    }
+
     /** Top of the Santa bitmap on the fixed bottom ground line. */
     private float santaGroundY() {
         if (santa == null) return 0f;
-        return dHeight - santa.getHeight() - Math.max(4f, dHeight / 40f);
+        float feetY = groundTop() + groundHeight() * 0.48f;
+        return Math.max(hudBottom, feetY - santa.getHeight());
     }
 
     private void clampSanta() {
@@ -365,10 +609,11 @@ public class GameView extends View {
         santaY = santaGroundY();
     }
 
-    private boolean checkGameOver() { return runWon || getRemainingLives() == 0 || explosion != null; }
+    private boolean checkGameOver() { return runWon || explosion != null; }
 
     private void gameOver() {
         if (gameOverRunnable != null) return;
+        bombRainActive = false;
         handler.removeCallbacks(runnableNewPresents);
         handler.removeCallbacks(runnableFallingPresents);
         if (getScore() > highScore) {
@@ -429,6 +674,7 @@ public class GameView extends View {
             if (gameOverRunnable != null) scheduleGameOver();
             else if (!levelComplete) {
                 handler.postDelayed(runnableFallingPresents, moveObjectPeriod);
+                armBombRain();
                 scheduleSpawn();
             }
         } else {
@@ -436,6 +682,10 @@ public class GameView extends View {
             handler.removeCallbacks(runnableFallingPresents);
             if (gameOverRunnable == null)
                 spawnRemaining = Math.max(0, spawnDeadline - pausedAtMs);
+            if (bombRainDeadline != 0) {
+                bombRainRemaining = Math.max(0, bombRainDeadline - pausedAtMs);
+                bombRainDeadline = 0;
+            }
             handler.removeCallbacks(runnableNewPresents);
             if (gameOverRunnable != null) {
                 gameOverRemaining = Math.max(0, gameOverDeadline - SystemClock.uptimeMillis());
@@ -564,8 +814,8 @@ public class GameView extends View {
     }
 
     private void InitBitmaps() {
-        rectBackground = new Rect(0, gameViewTop, dWidth, dHeight - dHeight / 10);
-        rectGround = new Rect(0, dHeight - dHeight / 10, dWidth, dHeight);
+        rectBackground = new Rect(0, gameViewTop, dWidth, dHeight);
+        rectGround = new Rect(0, groundTop(), dWidth, dHeight);
         background = intrinsicBitmap(R.drawable.bg_play);
         ground = intrinsicBitmap(R.drawable.ground_snow);
         updateSantaLayout();
@@ -598,7 +848,7 @@ public class GameView extends View {
 
     private Rect treeRect() {
         Rect dest = rectBackground != null ? rectBackground
-                : new Rect(0, gameViewTop, dWidth, dHeight - dHeight / 10);
+                : new Rect(0, gameViewTop, dWidth, groundTop());
         int bmpW = background != null ? background.getWidth() : 768;
         int bmpH = background != null ? background.getHeight() : 1376;
         float scale = Math.max((float) dest.width() / bmpW, (float) dest.height() / bmpH);
@@ -611,7 +861,7 @@ public class GameView extends View {
         float screenX = dest.left + (srcX - left) * scale;
         float screenY = dest.top + (srcY - top) * scale;
         int playTop = (int) Math.ceil(hudBottom);
-        int playBottom = dHeight - dHeight / 10;
+        int playBottom = groundTop();
         int side = Math.max(1, (Math.max(1, dWidth / 5) + Math.max(1, dWidth / 4)) / 2);
         side = Math.min(side, Math.max(1, playBottom - playTop));
         side = Math.min(side, Math.max(1, dWidth));
@@ -672,7 +922,8 @@ public class GameView extends View {
     }
 
     private int sleighCheckpoint() {
-        return floorCheckpoint(stock, LevelTable.quota(level));
+        if (stock <= 0) return 0;
+        return Math.max(20, floorCheckpoint(stock, LevelTable.quota(level)));
     }
 
     private int treeCheckpoint() {
@@ -724,6 +975,10 @@ public class GameView extends View {
             Map.Entry<FallingObject, Integer> entry = reaction.next();
             if (!fallingObjects.contains(entry.getKey()) || entry.getValue() <= 1) reaction.remove();
             else entry.setValue(entry.getValue() - 1);
+        }
+        if (!levelComplete && explosion == null && stock <= 0
+                && pendingThrows.isEmpty() && fallingObjects.isEmpty()) {
+            finishLevel();
         }
     }
 
@@ -803,36 +1058,25 @@ public class GameView extends View {
     }
 
     private void addNewFallingObject() {
-        if (levelComplete || levelCaught >= LevelTable.quota(level)) return;
+        if (levelComplete) return;
         if (fallingObjects.size() + pendingThrows.size() >= 8) return;
-        int quota = LevelTable.quota(level);
-        boolean needPresent = levelCaught + inFlightPresents() < quota;
-        boolean canPresent = stock > pendingPresents();
-        FallingObjectType type;
-        Bitmap image;
-        if (needPresent && canPresent) {
-            if (random.nextInt(100) < LevelTable.bombChancePercent(level)) {
-                type = FallingObjectType.BOMB;
-                image = bombImg;
-            } else if (random.nextInt(100) < LevelTable.snowflakeChancePercent(level)) {
-                type = FallingObjectType.SNOWFLAKE;
-                image = snowflakeImg;
-            } else {
-                type = FallingObjectType.PRESENT;
-                image = presentImages.get(random.nextInt(presentImages.size()));
-            }
-        } else if (levelCaught < quota) {
-            if (random.nextInt(100) < LevelTable.bombChancePercent(level)) {
-                type = FallingObjectType.BOMB;
-                image = bombImg;
-            } else {
-                type = FallingObjectType.SNOWFLAKE;
-                image = snowflakeImg;
-            }
-        } else {
+        if (bombRainActive && stock > 0) {
+            pendingThrows.addLast(new PendingThrow(FallingObjectType.BOMB, bombImg, LevelTable.speedMultiplier(level)));
             return;
         }
-        if (type == FallingObjectType.PRESENT && !canPresent) return;
+        if (stock <= pendingPresents()) return;
+        FallingObjectType type;
+        Bitmap image;
+        if (random.nextInt(100) < LevelTable.bombChancePercent(level)) {
+            type = FallingObjectType.BOMB;
+            image = bombImg;
+        } else if (random.nextInt(100) < LevelTable.snowflakeChancePercent(level)) {
+            type = FallingObjectType.SNOWFLAKE;
+            image = snowflakeImg;
+        } else {
+            type = FallingObjectType.PRESENT;
+            image = presentImages.get(random.nextInt(presentImages.size()));
+        }
         pendingThrows.addLast(new PendingThrow(type, image, LevelTable.speedMultiplier(level)));
     }
 
@@ -868,7 +1112,8 @@ public class GameView extends View {
     }
 
     private float brokenPresentGroundY(Bitmap img) {
-        return dHeight - img.getHeight() - Math.max(4f, dHeight / 40f);
+        float feetY = groundTop() + groundHeight() * 0.50f;
+        return Math.max(hudBottom, feetY - img.getHeight());
     }
 
     private void checkIfLeftTheScreen() {
@@ -880,8 +1125,6 @@ public class GameView extends View {
                 if (item.costsLifeIfMissed()) {
                     missedPresents++;
                     combo = 0;
-                    int cap = LevelTable.quota(level) - levelCaught;
-                    if (stock < cap) stock++;
                     int variant = Math.max(0, presentImages.indexOf(item.getImage()));
                     if (!brokenPresentImages.isEmpty()) {
                         Bitmap brokenImg = brokenPresentImages.get(Math.min(variant, brokenPresentImages.size() - 1));
@@ -928,11 +1171,13 @@ public class GameView extends View {
                 comboPeak = Math.max(comboPeak, combo);
                 score += item.getScoreValue() * combo;
                 levelCaught++;
-                if (levelCaught >= LevelTable.quota(level)) {
-                    enterLevelComplete();
+            } else if (item.getFallingObjectType() == FallingObjectType.SNOWFLAKE) {
+                if (!brokenPresents.isEmpty()) {
+                    brokenPresents.remove(brokenPresents.size() - 1);
+                    missedPresents = Math.max(0, missedPresents - 1);
+                    levelCaught++;
+                    score++;
                 }
-            } else if (item.getFallingObjectType() == FallingObjectType.SNOWFLAKE && getRemainingLives() < 5) {
-                bonusLives++;
             }
             burstCount = 8;
             burstStartMs = SystemClock.uptimeMillis();
@@ -941,9 +1186,27 @@ public class GameView extends View {
         }
     }
 
+    private void finishLevel() {
+        if (missedPresents > 3) {
+            runWon = false;
+            gameOver();
+            return;
+        }
+        LevelProgress.recordPass(sharedPreferences, level, missedPresents);
+        if (level >= LevelTable.LEVEL_COUNT) {
+            runWon = true;
+            gameOver();
+            return;
+        }
+        enterLevelComplete();
+    }
+
     private void enterLevelComplete() {
         if (levelComplete) return;
+        bombRainActive = false;
+        draggingSanta = false;
         levelComplete = true;
+        levelCompleteStartMs = SystemClock.uptimeMillis();
         pauseGameplayHandlers();
         postInvalidate();
     }
@@ -958,6 +1221,8 @@ public class GameView extends View {
         }
         level++;
         levelCaught = 0;
+        missedPresents = 0;
+        brokenPresents.clear();
         combo = 0;
         comboPeak = 0;
         stock = LevelTable.quota(level);
@@ -966,11 +1231,12 @@ public class GameView extends View {
         elfTargetX = homeX();
         treeStep = -1;
         sleighStep = -1;
+        resetBombRain();
         spawnRemaining = LevelTable.spawnPeriodMs(level);
+        armBombRain();
         resumeGameplay();
         postInvalidate();
     }
 
     private int getScore() { return score; }
-    private int getRemainingLives() { return Math.max(0, Math.min(5, 3 + bonusLives - missedPresents)); }
 }
