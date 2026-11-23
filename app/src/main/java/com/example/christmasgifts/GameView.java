@@ -7,11 +7,14 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Shader;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Handler;
@@ -40,8 +43,8 @@ public class GameView extends View {
     private final Context context;
     static int dWidth, dHeight, gameViewTop;
     private Bitmap ground, background, bombImg, snowflakeImg, explosionBitmap, explosion, santa;
-    private float santaX, santaY;
-    private boolean santaPlaced;
+    private float santaX, santaY, lastTouchX;
+    private boolean santaPlaced, draggingSanta, nextButtonPressed;
     private Bitmap elf;
     private float elfX, elfY, elfTargetX;
     private boolean elfPlaced, dropChosen;
@@ -167,7 +170,7 @@ public class GameView extends View {
     private void InitRest() {
         textPaint.setColor(ContextCompat.getColor(context, R.color.festive_cream));
         textPaint.setTextSize(Math.max(1, Math.min(50, gameViewTop / 4f)));
-        textPaint.setTypeface(ResourcesCompat.getFont(context, R.font.winter_snow_regular));
+        textPaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         textPaint.setStyle(Paint.Style.FILL);
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
         highScore = sharedPreferences.getInt(context.getString(R.string.high_score), 0);
@@ -221,16 +224,42 @@ public class GameView extends View {
         float touchX = event.getX();
         float touchY = event.getY();
         if (levelComplete) {
-            if (event.getAction() == MotionEvent.ACTION_UP && nextLevelButton.contains(touchX, touchY)) {
-                advanceFromLevelCard();
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE) {
+                boolean inside = nextLevelButton.contains(touchX, touchY);
+                if (inside != nextButtonPressed) {
+                    nextButtonPressed = inside;
+                    postInvalidate();
+                }
+            } else if (action == MotionEvent.ACTION_UP) {
+                boolean shouldAdvance = nextButtonPressed && nextLevelButton.contains(touchX, touchY);
+                nextButtonPressed = false;
+                postInvalidate();
+                if (shouldAdvance) advanceFromLevelCard();
+            } else if (action == MotionEvent.ACTION_CANCEL) {
+                nextButtonPressed = false;
+                postInvalidate();
             }
             return true;
         }
         if (santa == null || gameOverRunnable != null) return true;
-        if (event.getAction() == MotionEvent.ACTION_DOWN || event.getAction() == MotionEvent.ACTION_MOVE) {
-            santaX = touchX - santa.getWidth() / 2f;
-            clampSanta();
-            postInvalidate();
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                lastTouchX = touchX;
+                draggingSanta = true;
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (draggingSanta) {
+                    santaX += touchX - lastTouchX;
+                    lastTouchX = touchX;
+                    clampSanta();
+                    postInvalidate();
+                }
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                draggingSanta = false;
+                break;
         }
         return true;
     }
@@ -351,11 +380,11 @@ public class GameView extends View {
         float easeEnter = 1f - (1f - enterT) * (1f - enterT);
         float slideY = (1f - easeEnter) * Math.max(18f, dHeight / 30f);
 
-        float pad = Math.max(14f, dWidth / 18f);
+        float pad = Math.max(16f, dWidth / 16f);
         float cardLeft = pad;
         float cardRight = dWidth - pad;
         float cardTop = hudBottom + pad + slideY;
-        float cardBottom = Math.min(dHeight - pad, cardTop + dHeight * 0.56f);
+        float cardBottom = Math.min(dHeight - pad, cardTop + dHeight * 0.62f);
 
         int cardAlpha = (int) (235 * easeEnter);
         cardPaint.setStyle(Paint.Style.FILL);
@@ -427,13 +456,13 @@ public class GameView extends View {
         int animCombo = Math.round(comboPeak * statsT);
         int animScore = Math.round(score * statsT);
 
-        float rowSize = Math.max(14f, Math.min(savedSize * 0.95f, (cardBottom - cardTop) / 9f));
+        float rowSize = Math.max(15f, Math.min(savedSize * 1.05f, (cardBottom - cardTop) / 11f));
         textPaint.setTextSize(rowSize);
         textPaint.setColor(creamColor);
         textPaint.setTextAlign(Paint.Align.LEFT);
         Paint.FontMetrics fm = textPaint.getFontMetrics();
-        float line = rowSize + Math.max(6f, -fm.ascent * 0.2f);
-        y = starY + starRadius + pad * 0.8f - fm.ascent;
+        float line = rowSize * 1.6f;
+        y = starY + starRadius + pad * 1.15f - fm.ascent;
         int quota = LevelTable.quota(level);
         String[] rows = {
                 "Gifts Collected: " + animCaught + "/" + quota,
@@ -447,18 +476,47 @@ public class GameView extends View {
             y += line;
         }
 
-        float buttonTop = Math.min(cardBottom - pad - line * 1.4f, y + line * 0.35f);
-        float buttonBottom = Math.min(cardBottom - pad, buttonTop + line * 1.5f);
+        float btnHeight = Math.max(44f, line * 1.35f);
+        float buttonTop = Math.min(cardBottom - pad - btnHeight, y + line * 0.35f);
+        float buttonBottom = Math.min(cardBottom - pad, buttonTop + btnHeight);
         nextLevelButton.set(cardLeft + pad, buttonTop, cardRight - pad, buttonBottom);
+
+        // 3D extruded gold button
+        float bevel = Math.max(5f, btnHeight * 0.14f);
+        float pressOffset = nextButtonPressed ? bevel * 0.6f : 0f;
+        int btnAlpha = (int) (255 * easeEnter);
+
+        // Drop shadow
         cardPaint.setStyle(Paint.Style.FILL);
-        cardPaint.setColor(goldColor);
-        cardPaint.setAlpha((int) (255 * easeEnter));
-        canvas.drawRoundRect(nextLevelButton, 12, 12, cardPaint);
+        cardPaint.setColor(Color.argb((int) (110 * easeEnter), 0, 0, 0));
+        canvas.drawRoundRect(nextLevelButton.left, nextLevelButton.top + bevel * 1.45f,
+                nextLevelButton.right, nextLevelButton.bottom + bevel * 1.45f, 16, 16, cardPaint);
+
+        // 3D bottom lip
+        cardPaint.setColor(Color.rgb(166, 114, 12));
+        cardPaint.setAlpha(btnAlpha);
+        canvas.drawRoundRect(nextLevelButton.left, nextLevelButton.top + bevel,
+                nextLevelButton.right, nextLevelButton.bottom + bevel, 14, 14, cardPaint);
+
+        // Gradient top face
+        RectF face = new RectF(nextLevelButton.left, nextLevelButton.top + pressOffset,
+                nextLevelButton.right, nextLevelButton.bottom + pressOffset);
+        cardPaint.setShader(new LinearGradient(0, face.top, 0, face.bottom,
+                Color.rgb(255, 234, 130), Color.rgb(245, 180, 32), Shader.TileMode.CLAMP));
+        canvas.drawRoundRect(face, 14, 14, cardPaint);
+        cardPaint.setShader(null);
+
+        // Specular rim highlight
+        cardPaint.setStyle(Paint.Style.STROKE);
+        cardPaint.setStrokeWidth(2.5f);
+        cardPaint.setColor(Color.argb((int) (170 * easeEnter), 255, 255, 255));
+        canvas.drawRoundRect(face.left + 1.5f, face.top + 1.5f, face.right - 1.5f, face.bottom - 1.5f, 13, 13, cardPaint);
+
         textPaint.setColor(ContextCompat.getColor(context, R.color.festive_night));
         String label = "Next Level";
         float labelW = textPaint.measureText(label);
-        canvas.drawText(label, nextLevelButton.centerX() - labelW / 2f,
-                nextLevelButton.centerY() - (fm.ascent + fm.descent) / 2f, textPaint);
+        canvas.drawText(label, face.centerX() - labelW / 2f,
+                face.centerY() - (fm.ascent + fm.descent) / 2f, textPaint);
 
         textPaint.setTextSize(savedSize);
         textPaint.setColor(savedColor);
@@ -495,10 +553,10 @@ public class GameView extends View {
     }
 
     private void fitHud() {
-        String[] labels = {"Level 10", "Caught: 120/120", "Lives: 5", "Score: 999999"};
-        float padding = Math.max(4f, dWidth / 20f);
+        String[] labels = {"Level 10", "Caught: 120/120", "Missed: 3/3", "Score: 999999"};
+        float padding = Math.max(6f, dWidth / 20f);
         float columnWidth = Math.max(0, (dWidth - 3 * padding) / 2f);
-        float size = Math.max(1f, Math.min(50f, dHeight / 24f));
+        float size = Math.max(1f, Math.min(44f, dHeight / 30f));
         while (true) {
             textPaint.setTextSize(size);
             boolean fits = true;
@@ -507,9 +565,9 @@ public class GameView extends View {
             size = Math.max(1f, size - 1f);
         }
         Paint.FontMetrics fm = textPaint.getFontMetrics();
-        float margin = Math.max(3f, size * 0.15f);
+        float margin = Math.max(6f, size * 0.25f);
         hudFirstBaseline = margin - fm.ascent;
-        hudSecondBaseline = hudFirstBaseline + fm.descent - fm.ascent;
+        hudSecondBaseline = hudFirstBaseline + (fm.descent - fm.ascent) * 1.15f;
         hudBottom = Math.min(dHeight, hudSecondBaseline + fm.descent + margin);
         gameViewTop = Math.max(1, (int) Math.ceil(hudBottom));
     }
@@ -864,7 +922,8 @@ public class GameView extends View {
     }
 
     private int sleighCheckpoint() {
-        return floorCheckpoint(stock, LevelTable.quota(level));
+        if (stock <= 0) return 0;
+        return Math.max(20, floorCheckpoint(stock, LevelTable.quota(level)));
     }
 
     private int treeCheckpoint() {
@@ -1145,6 +1204,7 @@ public class GameView extends View {
     private void enterLevelComplete() {
         if (levelComplete) return;
         bombRainActive = false;
+        draggingSanta = false;
         levelComplete = true;
         levelCompleteStartMs = SystemClock.uptimeMillis();
         pauseGameplayHandlers();
