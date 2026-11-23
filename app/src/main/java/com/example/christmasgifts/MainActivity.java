@@ -13,6 +13,7 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.GridLayout;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -31,11 +32,27 @@ public class MainActivity extends AppCompatActivity {
         if (getSupportActionBar()!=null)
             getSupportActionBar().hide();
         setContentView(R.layout.activity_main);
+        renderMenu();
+    }
+
+    private void renderMenu() {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
         int highScore = prefs.getInt(getString(R.string.high_score), 0);
         TextView menuHighScore = findViewById(R.id.menu_high_score);
         menuHighScore.setText(getString(R.string.menu_high_score_fmt, highScore));
         bindLevelGrid(prefs);
+        ImageButton quitButton = findViewById(R.id.btn_quit);
+        quitButton.setOnClickListener(view -> finishAndRemoveTask());
+    }
+
+    public void returnToMenu() {
+        if (gameView != null) {
+            gameView.setActivityResumed(false);
+            gameView = null;
+        }
+        setContentView(R.layout.activity_main);
+        renderMenu();
+        hideSystemBars();
     }
 
     private void bindLevelGrid(SharedPreferences prefs) {

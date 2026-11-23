@@ -44,7 +44,7 @@ public class GameView extends View {
     static int dWidth, dHeight, gameViewTop;
     private Bitmap ground, background, bombImg, snowflakeImg, explosionBitmap, explosion, santa;
     private float santaX, santaY, lastTouchX;
-    private boolean santaPlaced, draggingSanta, nextButtonPressed;
+    private boolean santaPlaced, draggingSanta, nextButtonPressed, homeButtonPressed;
     private Bitmap elf;
     private float elfX, elfY, elfTargetX;
     private boolean elfPlaced, dropChosen;
@@ -61,6 +61,7 @@ public class GameView extends View {
     private float hudFirstBaseline, hudSecondBaseline, hudBottom;
     private Rect rectBackground, rectGround;
     private final RectF nextLevelButton = new RectF();
+    private final RectF homeButton = new RectF();
     private Handler handler;
     private Runnable runnableFallingPresents, runnableNewPresents, gameOverRunnable;
     private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -73,6 +74,7 @@ public class GameView extends View {
     private int burstCount;
     private long burstStartMs, explosionStartMs, pausedAtMs, levelCompleteStartMs;
     private final Path starPath = new Path();
+    private final Path homeIconPath = new Path();
     private final Random random = new Random();
     private final List<FallingObject> fallingObjects = new ArrayList<>();
     // Mirrors the bomb's 40 movement ticks, including the last protected collision check.
@@ -223,8 +225,34 @@ public class GameView extends View {
     @Override public boolean onTouchEvent(MotionEvent event) {
         float touchX = event.getX();
         float touchY = event.getY();
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN && homeButton.contains(touchX, touchY)) {
+            homeButtonPressed = true;
+            postInvalidate();
+            return true;
+        }
+        if (homeButtonPressed) {
+            if (action == MotionEvent.ACTION_MOVE) {
+                boolean inside = homeButton.contains(touchX, touchY);
+                if (inside != homeButtonPressed) {
+                    homeButtonPressed = inside;
+                    postInvalidate();
+                }
+            } else if (action == MotionEvent.ACTION_UP) {
+                boolean shouldReturn = homeButton.contains(touchX, touchY);
+                homeButtonPressed = false;
+                postInvalidate();
+                if (shouldReturn && context instanceof MainActivity) {
+                    pauseGameplayHandlers();
+                    ((MainActivity) context).returnToMenu();
+                }
+            } else if (action == MotionEvent.ACTION_CANCEL) {
+                homeButtonPressed = false;
+                postInvalidate();
+            }
+            return true;
+        }
         if (levelComplete) {
-            int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE) {
                 boolean inside = nextLevelButton.contains(touchX, touchY);
                 if (inside != nextButtonPressed) {
@@ -328,9 +356,13 @@ public class GameView extends View {
         canvas.restore();
         String[] labels = {"Level " + level, "Caught: " + levelCaught + "/" + LevelTable.quota(level),
                 "Missed: " + missedPresents + "/3", "Score: " + score};
-        float padding = Math.max(4f, dWidth / 20f);
+        float padding = Math.max(6f, dWidth / 20f);
         float gap = padding;
-        float columnWidth = Math.max(0, (dWidth - 2 * padding - gap) / 2f);
+        float homeSize = Math.max(28f, hudBottom - 12f);
+        float homeLeft = dWidth - padding / 2f - homeSize - 6f;
+        float homeTop = (hudBottom - homeSize) / 2f;
+        homeButton.set(homeLeft, homeTop, homeLeft + homeSize, homeTop + homeSize);
+        float columnWidth = Math.max(0, (homeLeft - 2 * padding - gap) / 2f);
         float rightX = padding + columnWidth + gap;
         hudPaint.setStyle(Paint.Style.FILL);
         hudPaint.setColor(ContextCompat.getColor(context, R.color.festive_night));
@@ -345,8 +377,46 @@ public class GameView extends View {
         canvas.drawText(TextUtils.ellipsize(labels[1], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), rightX, hudFirstBaseline, textPaint);
         canvas.drawText(TextUtils.ellipsize(labels[2], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), padding, hudSecondBaseline, textPaint);
         canvas.drawText(TextUtils.ellipsize(labels[3], textPaint, columnWidth, TextUtils.TruncateAt.END).toString(), rightX, hudSecondBaseline, textPaint);
+        drawHomeButton(canvas);
         if (bombRainActive) drawBombRainBanner(canvas);
         if (levelComplete) drawLevelCard(canvas);
+    }
+
+    private void drawHomeButton(Canvas canvas) {
+        float press = homeButtonPressed ? 2f : 0f;
+        RectF btn = new RectF(homeButton.left, homeButton.top + press,
+                homeButton.right, homeButton.bottom + press);
+        float corner = Math.max(8f, btn.width() * 0.25f);
+        hudPaint.setStyle(Paint.Style.FILL);
+        hudPaint.setColor(ContextCompat.getColor(context, R.color.festive_green));
+        hudPaint.setAlpha(240);
+        canvas.drawRoundRect(btn, corner, corner, hudPaint);
+        hudPaint.setStyle(Paint.Style.STROKE);
+        hudPaint.setStrokeWidth(2.2f);
+        hudPaint.setColor(ContextCompat.getColor(context, R.color.festive_gold));
+        hudPaint.setAlpha(255);
+        canvas.drawRoundRect(btn, corner, corner, hudPaint);
+
+        // Crisp house icon inside the button
+        float cx = btn.centerX();
+        float cy = btn.centerY();
+        float r = btn.width() * 0.28f;
+        homeIconPath.reset();
+        homeIconPath.moveTo(cx, cy - r * 1.05f);
+        homeIconPath.lineTo(cx + r * 1.15f, cy - r * 0.05f);
+        homeIconPath.lineTo(cx + r * 0.8f, cy - r * 0.05f);
+        homeIconPath.lineTo(cx + r * 0.8f, cy + r * 0.95f);
+        homeIconPath.lineTo(cx + r * 0.25f, cy + r * 0.95f);
+        homeIconPath.lineTo(cx + r * 0.25f, cy + r * 0.35f);
+        homeIconPath.lineTo(cx - r * 0.25f, cy + r * 0.35f);
+        homeIconPath.lineTo(cx - r * 0.25f, cy + r * 0.95f);
+        homeIconPath.lineTo(cx - r * 0.8f, cy + r * 0.95f);
+        homeIconPath.lineTo(cx - r * 0.8f, cy - r * 0.05f);
+        homeIconPath.lineTo(cx - r * 1.15f, cy - r * 0.05f);
+        homeIconPath.close();
+        hudPaint.setStyle(Paint.Style.FILL);
+        hudPaint.setColor(ContextCompat.getColor(context, R.color.festive_cream));
+        canvas.drawPath(homeIconPath, hudPaint);
     }
 
     private void drawBombRainBanner(Canvas canvas) {
@@ -555,7 +625,8 @@ public class GameView extends View {
     private void fitHud() {
         String[] labels = {"Level 10", "Caught: 120/120", "Missed: 3/3", "Score: 999999"};
         float padding = Math.max(6f, dWidth / 20f);
-        float columnWidth = Math.max(0, (dWidth - 3 * padding) / 2f);
+        float homeReserve = Math.max(40f, dHeight / 16f);
+        float columnWidth = Math.max(0, (dWidth - 3 * padding - homeReserve) / 2f);
         float size = Math.max(1f, Math.min(44f, dHeight / 30f));
         while (true) {
             textPaint.setTextSize(size);

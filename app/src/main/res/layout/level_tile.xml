@@ -2,7 +2,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:layout_margin="6dp"
+    android:layout_margin="8dp"
     android:clickable="true"
     android:focusable="true"
     android:gravity="center_horizontal"
@@ -17,29 +17,29 @@
 
         <ImageView
             android:id="@+id/star_1"
-            android:layout_width="14dp"
-            android:layout_height="14dp"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
             android:importantForAccessibility="no"
             android:src="@drawable/ic_star" />
 
         <ImageView
             android:id="@+id/star_2"
-            android:layout_width="14dp"
-            android:layout_height="14dp"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
             android:importantForAccessibility="no"
             android:src="@drawable/ic_star" />
 
         <ImageView
             android:id="@+id/star_3"
-            android:layout_width="14dp"
-            android:layout_height="14dp"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
             android:importantForAccessibility="no"
             android:src="@drawable/ic_star" />
     </LinearLayout>
 
     <FrameLayout
-        android:layout_width="56dp"
-        android:layout_height="56dp">
+        android:layout_width="76dp"
+        android:layout_height="76dp">
 
         <ImageView
             android:id="@+id/level_icon"
@@ -55,13 +55,14 @@
             android:layout_gravity="center"
             android:fontFamily="@font/winter_snow_regular"
             android:textColor="@color/festive_cream"
-            android:textSize="18sp" />
+            android:textSize="24sp" />
 
         <ImageView
             android:id="@+id/level_lock"
-            android:layout_width="18dp"
-            android:layout_height="18dp"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
             android:layout_gravity="top|end"
+            android:layout_margin="4dp"
             android:importantForAccessibility="no"
             android:src="@drawable/ic_lock"
             android:visibility="gone" />
